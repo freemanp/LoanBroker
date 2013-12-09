@@ -1,0 +1,16 @@
+org/bank/services/credit/web/services/CreditScoreResponse.class
+org/bank/services/credit/web/services/CreditScoreService_Service.class
+org/bank/services/credit/web/services/ObjectFactory.class
+dk/cphbusiness/group11/GetBanks/exceptions/GetBankParseException.class
+dk/cphbusiness/group11/GetBanks/exceptions/GetBankException.class
+dk/cphbusiness/group11/RecipientList/RecipientList.class
+dk/cphbusiness/group11/GetBanks/exceptions/GetBankWritingException.class
+dk/cphbusiness/group11/GetBanks/manualTest/ManualTest.class
+dk/cphbusiness/group11/GetBanks/GetBanks.class
+dk/cphbusiness/group11/loanbroker/LoanBrokerWS.class
+org/bank/services/credit/web/services/CreditScoreService.class
+dk/cphbusiness/group11/GetBanks/Bank.class
+org/bank/services/credit/web/services/CreditScore.class
+org/bank/services/credit/web/services/package-info.class
+dk/cphbusiness/group11/GetBanks/exceptions/GetBankCreditScoreException.class
+dk/cphbusiness/group11/GetBanks/MessageProcessor.class

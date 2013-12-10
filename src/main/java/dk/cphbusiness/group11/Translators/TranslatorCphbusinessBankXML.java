@@ -1,5 +1,7 @@
 package dk.cphbusiness.group11.Translators;
 
+import com.rabbitmq.client.AMQP.BasicProperties;
+import com.rabbitmq.client.AMQP.BasicProperties.Builder;
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
@@ -7,7 +9,10 @@ import com.rabbitmq.client.QueueingConsumer;
 import com.sun.org.apache.xerces.internal.dom.NodeImpl;
 import java.io.ByteArrayInputStream;
 import java.io.StringWriter;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.Date;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.transform.Transformer;
@@ -23,7 +28,9 @@ import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 
 public class TranslatorCphbusinessBankXML {
-    private static final String LISTNENING_QUEUE = "translator.group11.cphbusiness.bankXML";
+    private static final String RECEIVING_QUEUE = "translator.group11.cphbusiness.bankXML";
+    private static final String SENDING_QUEUE = "cphbusiness.bankXML";
+    private static final String REPLY_TO_QUEUE = "normalizer.group11";
     private boolean isRunning;
     
     public TranslatorCphbusinessBankXML(){
@@ -40,7 +47,8 @@ public class TranslatorCphbusinessBankXML {
         String ssn = loanDetailsElement.getElementsByTagName("ssn").item(0).getTextContent();
         String creditScore = loanDetailsElement.getElementsByTagName("creditScore").item(0).getTextContent();
         String loanAmount = loanDetailsElement.getElementsByTagName("loanAmount").item(0).getTextContent();
-        String loanDurationInMonths = loanDetailsElement.getElementsByTagName("loanDurationInMonths").item(0).getTextContent();
+        String temp = loanDetailsElement.getElementsByTagName("loanDurationInMonths").item(0).getTextContent();
+        int loanDurationInMonths = Integer.parseInt(temp);
         
         Document bankRequestXml = builder.newDocument();
         Element root = bankRequestXml.createElement("LoanRequest");
@@ -58,9 +66,33 @@ public class TranslatorCphbusinessBankXML {
         element.appendChild(bankRequestXml.createTextNode(loanAmount));
         root.appendChild(element);
         
-        element = bankRequestXml.createElement("loanDurationInMonths");
-        element.appendChild(bankRequestXml.createTextNode(loanDurationInMonths));
+        Calendar c = Calendar.getInstance();
+        c.set(1970, 1, 1);
+        c.add(Calendar.MONTH, loanDurationInMonths);
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+        String loanDate = sdf.format(c.getTime()) + ".0 CET";
+        
+        element = bankRequestXml.createElement("loanDuration");
+        element.appendChild(bankRequestXml.createTextNode(loanDate));
         root.appendChild(element);
+        
+        StringWriter writer = new StringWriter();
+        Transformer transformer = TransformerFactory.newInstance().newTransformer();
+        transformer.transform(new DOMSource(root), new StreamResult(writer));
+        String bankRequestXmlString = writer.toString();
+        
+        
+        ConnectionFactory factory = new ConnectionFactory();
+        factory.setHost("datdb.cphbusiness.dk");
+        Connection connection = factory.newConnection();
+        Channel channel = connection.createChannel();
+
+        channel.exchangeDeclare(SENDING_QUEUE, "fanout");
+        Builder propertiesBuilder = new BasicProperties.Builder();
+        propertiesBuilder.replyTo(REPLY_TO_QUEUE);
+        BasicProperties properties = propertiesBuilder.build();
+        
+        channel.basicPublish(SENDING_QUEUE, "", properties, bankRequestXmlString.getBytes());
     }
     
     public void run() throws Exception{
@@ -69,10 +101,10 @@ public class TranslatorCphbusinessBankXML {
         Connection connection = factory.newConnection();
         Channel channel = connection.createChannel();
 
-        channel.exchangeDeclare(LISTNENING_QUEUE, "fanout");
-        String queueName = channel.queueDeclare(LISTNENING_QUEUE,false,  false, false, null).getQueue();
-        channel.queueBind(queueName, LISTNENING_QUEUE, "");
-        System.out.println("Waiting for messages on queue: " + LISTNENING_QUEUE);
+        channel.exchangeDeclare(RECEIVING_QUEUE, "fanout");
+        String queueName = channel.queueDeclare(RECEIVING_QUEUE,false,  false, false, null).getQueue();
+        channel.queueBind(queueName, RECEIVING_QUEUE, "");
+        System.out.println("Waiting for messages on queue: " + RECEIVING_QUEUE);
 
         QueueingConsumer consumer = new QueueingConsumer(channel);
         channel.basicConsume(queueName, true, consumer);

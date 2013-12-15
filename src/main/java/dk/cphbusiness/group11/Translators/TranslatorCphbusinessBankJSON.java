@@ -1,39 +1,36 @@
 package dk.cphbusiness.group11.Translators;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.text.SimpleDateFormat;
+import java.util.Calendar;
+
+import javax.json.Json;
+import javax.json.JsonObjectBuilder;
+import javax.json.JsonWriter;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.xpath.XPath;
+import javax.xml.xpath.XPathConstants;
+import javax.xml.xpath.XPathFactory;
+
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+
 import com.rabbitmq.client.AMQP.BasicProperties;
 import com.rabbitmq.client.AMQP.BasicProperties.Builder;
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
 import com.rabbitmq.client.QueueingConsumer;
-import com.sun.org.apache.xerces.internal.dom.NodeImpl;
-import java.io.ByteArrayInputStream;
-import java.io.StringWriter;
-import java.text.SimpleDateFormat;
-import java.util.ArrayList;
-import java.util.Calendar;
-import java.util.Date;
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.transform.Transformer;
-import javax.xml.transform.TransformerFactory;
-import javax.xml.transform.dom.DOMSource;
-import javax.xml.transform.stream.StreamResult;
-import javax.xml.xpath.XPath;
-import javax.xml.xpath.XPathConstants;
-import javax.xml.xpath.XPathFactory;
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-import org.w3c.dom.Node;
-import org.w3c.dom.NodeList;
 
-public class TranslatorCphbusinessBankXML {
-    private static final String RECEIVING_QUEUE = "translator.group11.cphbusiness.bankXML";
-    private static final String SENDING_QUEUE = "cphbusiness.bankXML";
+public class TranslatorCphbusinessBankJSON {
+    private static final String RECEIVING_QUEUE = "translator.group11.cphbusiness.bankJSON";
+    private static final String SENDING_QUEUE = "cphbusiness.bankJSON";
     private static final String REPLY_TO_QUEUE = "normalizer.group11";
     private boolean isRunning;
     
-    public TranslatorCphbusinessBankXML(){
+    public TranslatorCphbusinessBankJSON(){
         this.isRunning = true;
     }
     
@@ -50,37 +47,15 @@ public class TranslatorCphbusinessBankXML {
         String temp = loanDetailsElement.getElementsByTagName("loanDurationInMonths").item(0).getTextContent();
         int loanDurationInMonths = Integer.parseInt(temp);
         
-        Document bankRequestXml = builder.newDocument();
-        Element root = bankRequestXml.createElement("LoanRequest");
-        bankRequestXml.appendChild(root);
+        JsonObjectBuilder loanBuilder = Json.createObjectBuilder();
         
-        Element element = bankRequestXml.createElement("ssn");
-        element.appendChild(bankRequestXml.createTextNode(ssn));
-        root.appendChild(element);
+        loanBuilder.add("ssn", ssn);
         
-        element = bankRequestXml.createElement("creditScore");
-        element.appendChild(bankRequestXml.createTextNode(creditScore));
-        root.appendChild(element);
+        loanBuilder.add("creditScore", creditScore);
         
-        element = bankRequestXml.createElement("loanAmount");
-        element.appendChild(bankRequestXml.createTextNode(loanAmount));
-        root.appendChild(element);
+        loanBuilder.add("loanAmount", loanAmount);
         
-        Calendar c = Calendar.getInstance();
-        c.set(1970, 1, 1);
-        c.add(Calendar.MONTH, loanDurationInMonths);
-        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
-        String loanDate = sdf.format(c.getTime()) + ".0 CET";
-        
-        element = bankRequestXml.createElement("loanDuration");
-        element.appendChild(bankRequestXml.createTextNode(loanDate));
-        root.appendChild(element);
-        
-        StringWriter writer = new StringWriter();
-        Transformer transformer = TransformerFactory.newInstance().newTransformer();
-        transformer.transform(new DOMSource(root), new StreamResult(writer));
-        String bankRequestXmlString = writer.toString();
-        
+        loanBuilder.add("loanDuration", loanDurationInMonths);
         
         ConnectionFactory factory = new ConnectionFactory();
         factory.setHost("datdb.cphbusiness.dk");
@@ -92,8 +67,13 @@ public class TranslatorCphbusinessBankXML {
         propertiesBuilder.replyTo(REPLY_TO_QUEUE);
         BasicProperties properties = propertiesBuilder.build();
         
-        System.out.println("Sent message: " + bankRequestXmlString);
-        channel.basicPublish(SENDING_QUEUE, "", properties, bankRequestXmlString.getBytes());
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        JsonWriter jsonWriter = Json.createWriter(outputStream);
+        jsonWriter.writeObject(loanBuilder.build());
+        jsonWriter.close();
+        
+        System.out.println("Sent message: " + outputStream.toString());
+        channel.basicPublish(SENDING_QUEUE, "", properties, outputStream.toByteArray());
     }
     
     public void run() throws Exception{
@@ -121,7 +101,7 @@ public class TranslatorCphbusinessBankXML {
     }
     
     public static void main(String[] args) throws Exception {
-        TranslatorCphbusinessBankXML t = new TranslatorCphbusinessBankXML();
+        TranslatorCphbusinessBankJSON t = new TranslatorCphbusinessBankJSON();
         t.run();
     }
 }

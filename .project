@@ -39,4 +39,11 @@
 		<nature>org.eclipse.wst.common.project.facet.core.nature</nature>
 		<nature>org.eclipse.wst.jsdt.core.jsNature</nature>
 	</natures>
+	<linkedResources>
+		<link>
+			<name>generated</name>
+			<type>2</type>
+			<location>/home/zylex/Dropbox/workspace/PBA/2ndSemester/LoanBroker/target/generated-sources/jaxws-wsimport</location>
+		</link>
+	</linkedResources>
 </projectDescription>

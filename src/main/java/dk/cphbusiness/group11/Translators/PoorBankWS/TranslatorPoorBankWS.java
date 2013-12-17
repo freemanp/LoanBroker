@@ -12,15 +12,8 @@ import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
 import com.rabbitmq.client.QueueingConsumer;
 import java.io.ByteArrayInputStream;
-import java.io.StringWriter;
-import java.text.SimpleDateFormat;
-import java.util.Calendar;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.transform.Transformer;
-import javax.xml.transform.TransformerFactory;
-import javax.xml.transform.dom.DOMSource;
-import javax.xml.transform.stream.StreamResult;
 import javax.xml.xpath.XPath;
 import javax.xml.xpath.XPathConstants;
 import javax.xml.xpath.XPathFactory;
@@ -56,20 +49,28 @@ public class TranslatorPoorBankWS {
         
         PoorBankService_Service service = new PoorBankService_Service();
         PoorBankService port = service.getPoorBankServiceImplPort();
-        PoorLoanResponsee result = port.poorLoan(ssn, creditScore, loanAmount, loanDurationInMonths);
+        String xmlReturnMessage = "";
         
-        ConnectionFactory factory = new ConnectionFactory();
-        factory.setHost("datdb.cphbusiness.dk");
-        Connection connection = factory.newConnection();
-        Channel channel = connection.createChannel();
-
-        channel.exchangeDeclare(SENDING_QUEUE, "fanout");
-        
-        String xmlReturnMessage = "<LoanResponse>"
-                + "<interestRate>" + result.getInterestRate() + "</interestRate> \n" +
+        try {
+            PoorLoanResponsee result = port.poorLoan(ssn, creditScore, loanAmount, loanDurationInMonths);
+            xmlReturnMessage = "<LoanResponse>" +
+                "<interestRate>" + result.getInterestRate() + "</interestRate> \n" +
                 "   <ssn>" + result.getSsn() + "</ssn> \n" +
                 "</LoanResponse>";
-        channel.basicPublish(SENDING_QUEUE, "", null, xmlReturnMessage.getBytes());
+        }
+        catch (PoorException_Exception pe){
+            xmlReturnMessage = "error";
+        }
+        finally {
+            ConnectionFactory factory = new ConnectionFactory();
+            factory.setHost("datdb.cphbusiness.dk");
+            Connection connection = factory.newConnection();
+            Channel channel = connection.createChannel();
+            channel.exchangeDeclare(SENDING_QUEUE, "fanout");
+            
+            channel.basicPublish(SENDING_QUEUE, "", null, xmlReturnMessage.getBytes());
+        }
+        
         
     }
     
@@ -80,7 +81,7 @@ public class TranslatorPoorBankWS {
         Channel channel = connection.createChannel();
 
         channel.exchangeDeclare(RECEIVING_QUEUE, "fanout");
-        String queueName = channel.queueDeclare(RECEIVING_QUEUE,false,  false, false, null).getQueue();
+        String queueName = channel.queueDeclare(RECEIVING_QUEUE, false, false, false, null).getQueue();
         channel.queueBind(queueName, RECEIVING_QUEUE, "");
         System.out.println("Waiting for messages on queue: " + RECEIVING_QUEUE);
 

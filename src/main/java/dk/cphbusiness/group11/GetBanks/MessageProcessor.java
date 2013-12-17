@@ -50,7 +50,7 @@ public class MessageProcessor {
 		availableBanks = new ArrayList<Bank>();
 		availableBanks.add(new Bank("cphbusiness.bankJSON", 700));
 		availableBanks.add(new Bank("cphbusiness.bankXML", 400));
-		availableBanks.add(new Bank("group11.poorBankXML", 0));
+		availableBanks.add(new Bank("group11.messagingBank", 0));
 	}
 
 	public void processMessage() {

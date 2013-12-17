@@ -44,6 +44,8 @@ public class MessagingBank {
         channel.exchangeDeclare(EXCHANGE_NAME, "fanout");
         String queueName = channel.queueDeclare().getQueue();
         channel.queueBind(queueName, EXCHANGE_NAME, "");
+        
+        System.out.println("Messaging Bank");
         System.out.println(" [*] Waiting for messages. To exit press CTRL+C");
 
         QueueingConsumer consumer = new QueueingConsumer(channel);
@@ -66,19 +68,19 @@ public class MessagingBank {
         
         Document loanRequestXml = builder.parse(new ByteArrayInputStream(message.getBytes()));
         XPath xPath = XPathFactory.newInstance().newXPath();
-        Element loanDetailsElement = (Element) xPath.compile("/LoanDetails").evaluate(loanRequestXml, XPathConstants.NODE);
+        Element loanDetailsElement = (Element) xPath.compile("/LoanRequest").evaluate(loanRequestXml, XPathConstants.NODE);
         String ssn = loanDetailsElement.getElementsByTagName("ssn").item(0).getTextContent();
         String creditScore = loanDetailsElement.getElementsByTagName("creditScore").item(0).getTextContent();
         String loanAmount = loanDetailsElement.getElementsByTagName("loanAmount").item(0).getTextContent();
-        String temp = loanDetailsElement.getElementsByTagName("loanDurationInMonths").item(0).getTextContent();
-        int loanDurationInMonths = Integer.parseInt(temp);
+        String temp = loanDetailsElement.getElementsByTagName("loanDuration").item(0).getTextContent();
+     //   int loanDurationInMonths = Integer.parseInt(temp);
         
         //String to int
         int amount = Integer.parseInt(loanAmount);
         int score = Integer.parseInt(creditScore);
             
         //get loan rate
-        float rate = getLoanRate(amount, score, loanDurationInMonths);
+        float rate = getLoanRate(score);
         
         //change float rate to String
         String interestRate = Float.toString(rate);
@@ -132,11 +134,11 @@ public class MessagingBank {
         connection.close();
     }
     
-    private static float getLoanRate(int amount, int creditScore, int duration){
+    private static float getLoanRate(int creditScore){
         
         float rate = 0;
         
-        rate = 5 / (float)creditScore /800;
+        rate = 5 / ((float)creditScore /800);
         
         return rate;
         

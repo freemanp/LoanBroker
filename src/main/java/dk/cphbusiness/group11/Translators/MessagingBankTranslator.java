@@ -41,11 +41,13 @@ public class MessagingBankTranslator {
         
         Document loanRequestXml = builder.parse(new ByteArrayInputStream(xmlMessage.getBytes()));
         XPath xPath = XPathFactory.newInstance().newXPath();
-        Element loanDetailsElement = (Element) xPath.compile("/LoanDetails").evaluate(loanRequestXml, XPathConstants.NODE);
+        Element loanDetailsElement = (Element) xPath.compile("/LoanRequest").evaluate(loanRequestXml, XPathConstants.NODE);
         String ssn = loanDetailsElement.getElementsByTagName("ssn").item(0).getTextContent();
         String creditScore = loanDetailsElement.getElementsByTagName("creditScore").item(0).getTextContent();
         String loanAmount = loanDetailsElement.getElementsByTagName("loanAmount").item(0).getTextContent();
-        String temp = loanDetailsElement.getElementsByTagName("loanDurationInMonths").item(0).getTextContent();
+      
+        
+        String temp = loanDetailsElement.getElementsByTagName("loanDuration").item(0).getTextContent();
         int loanDurationInMonths = Integer.parseInt(temp);
         
         Document bankRequestXml = builder.newDocument();
@@ -68,7 +70,7 @@ public class MessagingBankTranslator {
         c.set(1970, 1, 1);
         c.add(Calendar.MONTH, loanDurationInMonths);
         SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
-        String loanDate = sdf.format(c.getTime()) + ".0 CET";
+        String loanDate = sdf.format(c.getTime()) + " .0 CET";
         
         element = bankRequestXml.createElement("loanDuration");
         element.appendChild(bankRequestXml.createTextNode(loanDate));
@@ -103,6 +105,7 @@ public class MessagingBankTranslator {
         channel.exchangeDeclare(RECEIVING_QUEUE, "fanout");
         String queueName = channel.queueDeclare(RECEIVING_QUEUE,false,  false, false, null).getQueue();
         channel.queueBind(queueName, RECEIVING_QUEUE, "");
+        System.out.println("Messaging Bank Translator");
         System.out.println("Waiting for messages on queue: " + RECEIVING_QUEUE);
 
         QueueingConsumer consumer = new QueueingConsumer(channel);

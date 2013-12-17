@@ -10,7 +10,20 @@ import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
 import com.rabbitmq.client.QueueingConsumer;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.StringWriter;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.transform.Transformer;
+import javax.xml.transform.TransformerFactory;
+import javax.xml.transform.dom.DOMSource;
+import javax.xml.transform.stream.StreamResult;
+import javax.xml.xpath.XPath;
+import javax.xml.xpath.XPathConstants;
+import javax.xml.xpath.XPathFactory;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
 
 /**
  *
@@ -48,11 +61,59 @@ public class MessagingBank {
 
     private static void processMessage(String message) throws Exception {
         // read XML
-
+        DocumentBuilderFactory builderFactory = DocumentBuilderFactory.newInstance();
+        DocumentBuilder builder = builderFactory.newDocumentBuilder();
+        
+        Document loanRequestXml = builder.parse(new ByteArrayInputStream(message.getBytes()));
+        XPath xPath = XPathFactory.newInstance().newXPath();
+        Element loanDetailsElement = (Element) xPath.compile("/LoanDetails").evaluate(loanRequestXml, XPathConstants.NODE);
+        String ssn = loanDetailsElement.getElementsByTagName("ssn").item(0).getTextContent();
+        String creditScore = loanDetailsElement.getElementsByTagName("creditScore").item(0).getTextContent();
+        String loanAmount = loanDetailsElement.getElementsByTagName("loanAmount").item(0).getTextContent();
+        String temp = loanDetailsElement.getElementsByTagName("loanDurationInMonths").item(0).getTextContent();
+        int loanDurationInMonths = Integer.parseInt(temp);
+        
+        //String to int
+        int amount = Integer.parseInt(loanAmount);
+        int score = Integer.parseInt(creditScore);
+            
+        //get loan rate
+        float rate = getLoanRate(amount, score, loanDurationInMonths);
+        
+        //change float rate to String
+        String interestRate = Float.toString(rate);
+        
         // build reply message
+        // XML reply same format as the school bank xml
+        //            <LoanResponse>
+        //                <interestRate>4.5600000000000005</interestRate>
+        //                 <ssn>12345678</ssn>
+        //            </LoanResponse>
+        
+        
         String replyMessage = "";
-
-
+        
+        Document bankRequestXml = builder.newDocument();
+        Element root = bankRequestXml.createElement("LoanResponse");
+        bankRequestXml.appendChild(root);
+        
+        Element element = bankRequestXml.createElement("interestRate");
+        element.appendChild(bankRequestXml.createTextNode(interestRate));
+        root.appendChild(element);
+        
+        element = bankRequestXml.createElement("ssn");
+        element.appendChild(bankRequestXml.createTextNode(ssn));
+        root.appendChild(element);
+        
+         StringWriter writer = new StringWriter();
+        Transformer transformer = TransformerFactory.newInstance().newTransformer();
+        transformer.transform(new DOMSource(root), new StreamResult(writer));
+        
+        
+        replyMessage = writer.toString();
+        
+        
+       
         ConnectionFactory factory = new ConnectionFactory();
         factory.setHost("datdb.cphbusiness.dk");
         Connection connection = factory.newConnection();
@@ -70,4 +131,15 @@ public class MessagingBank {
         channel.close();
         connection.close();
     }
+    
+    private static float getLoanRate(int amount, int creditScore, int duration){
+        
+        float rate = 0;
+        
+        rate = 5 / (float)creditScore /800;
+        
+        return rate;
+        
+    }
+    
 }

@@ -13,7 +13,7 @@ import com.rabbitmq.client.QueueingConsumer;
 public class ManualTest {
 
 	private static final String QUEUE_NAME = "group11.GetBanks";
-	private static final String REPLY_QUEUE_NAME = "group11.GetBanksReply";
+	private static final String REPLY_QUEUE_NAME = "normalizer.group11";//"group11.GetBanksReply";
 
 	public static void main(String[] argv) throws Exception {
 		send();

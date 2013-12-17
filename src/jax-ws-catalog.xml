@@ -2,4 +2,9 @@
 <catalog xmlns="urn:oasis:names:tc:entity:xmlns:xml:catalog" prefer="system">
     <system systemId="http://datdb.cphbusiness.dk:8080/CreditBureau/CreditScoreService?wsdl" uri="wsdl/datdb.cphbusiness.dk_8080/CreditBureau/CreditScoreService.wsdl"/>
     <system systemId="http://datdb.cphbusiness.dk:8080/CreditBureau/CreditScoreService?xsd=1" uri="wsdl/datdb.cphbusiness.dk_8080/CreditBureau/CreditScoreService.xsd_1.xsd"/>
+    <system systemId="http://localhost:8080/LoanBroker/PoorBank?wsdl" uri="wsdl/localhost_8080/LoanBroker/PoorBank.wsdl"/>
+    <system systemId="http://localhost:8080/LoanBroker/PoorBank?xsd=1" uri="wsdl/localhost_8080/LoanBroker/PoorBank.xsd_1.xsd"/>
+    <system systemId="http://localhost:8080/PoorBank/PoorBankService?wsdl" uri="wsdl/localhost_8080/PoorBank/PoorBankService.wsdl"/>
+    <system systemId="http://localhost:8080/PoorBank/PoorBankService?xsd=1" uri="wsdl/localhost_8080/PoorBank/PoorBankService.xsd_1.xsd"/>
+    <system systemId="http://localhost:8080/PoorBank/PoorBankService?xsd=2" uri="wsdl/localhost_8080/PoorBank/PoorBankService.xsd_2.xsd"/>
 </catalog>

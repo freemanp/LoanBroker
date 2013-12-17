@@ -116,6 +116,21 @@
 						<id>wsimport-generate-CreditScoreService</id>
 						<phase>generate-sources</phase>
 					</execution>
+				 <execution>
+				  <goals>
+				   <goal>wsimport</goal>
+				  </goals>
+				  <configuration>
+				   <wsdlFiles>
+				    <wsdlFile>localhost_8080/PoorBank/PoorBankService.wsdl</wsdlFile>
+				   </wsdlFiles>
+				   <packageName>dk.cphbusiness.group11.PoorBankWS</packageName>
+				   <wsdlLocation>http://localhost:8080/PoorBank/PoorBankService?wsdl</wsdlLocation>
+				   <staleFile>${project.build.directory}/jaxws/stale/PoorBankService.stale</staleFile>
+				  </configuration>
+				  <id>wsimport-generate-PoorBankService</id>
+				  <phase>generate-sources</phase>
+				 </execution>
 				</executions>
 				<dependencies>
 					<dependency>

@@ -2,8 +2,6 @@ package dk.cphbusiness.group11.Translators;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.text.SimpleDateFormat;
-import java.util.Calendar;
 
 import javax.json.Json;
 import javax.json.JsonObjectBuilder;

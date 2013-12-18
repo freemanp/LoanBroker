@@ -1,19 +1,23 @@
 /*
- * REMEMBER TO LAUNCH GetBanks.java before
+ * To change this template, choose Tools | Templates
+ * and open the template in the editor.
  */
-package dk.cphbusiness.group11.GetBanks.manualTest;
+package dk.cphbusiness.group11.manualTest_MesaagingBank;
 
-import com.rabbitmq.client.AMQP.BasicProperties;
-import com.rabbitmq.client.AMQP.BasicProperties.Builder;
+import com.rabbitmq.client.AMQP;
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
 import com.rabbitmq.client.QueueingConsumer;
 
-public class ManualTest {
-
-	private static final String QUEUE_NAME = "group11.GetBanks";
-	private static final String REPLY_QUEUE_NAME = "group11.GetBanksReply";
+/**
+ *
+ * @author Anth
+ */
+public class ManualTest_MessagingBank {
+    
+    private static final String QUEUE_NAME = "translator.group11.cphbusiness.messagingBank" ;//"group11.GetBanks";
+	private static final String REPLY_QUEUE_NAME = "normalizer.group11";//"group11.GetBanksReply";
 
 	public static void main(String[] argv) throws Exception {
 		send();
@@ -46,14 +50,14 @@ public class ManualTest {
 
 		channel.queueDeclare(QUEUE_NAME, false, false, false, null);
 
-		Builder propertiesBuilder = new BasicProperties.Builder();
+		AMQP.BasicProperties.Builder propertiesBuilder = new AMQP.BasicProperties.Builder();
 		propertiesBuilder.replyTo(REPLY_QUEUE_NAME);
-		BasicProperties properties = propertiesBuilder.build();
+		AMQP.BasicProperties properties = propertiesBuilder.build();
 
-		String message = "<LoanDetails><ssn>1234567890</ssn>"
+		String message = "<LoanRequest><ssn>1234567890</ssn>"
 				+ "<creditScore>585</creditScore>"
-				+ "<loanAmount>1000.0</loanAmount><loanDurationInMonths>36</loanDurationInMonths>"
-				+ "</LoanDetails>";
+				+ "<loanAmount>1000</loanAmount><loanDuration>36</loanDuration>"
+				+ "</LoanRequest>";
 
 		channel.basicPublish("", QUEUE_NAME, properties, message.getBytes());
 		System.out.println(" [x] Sent '" + message + "'");

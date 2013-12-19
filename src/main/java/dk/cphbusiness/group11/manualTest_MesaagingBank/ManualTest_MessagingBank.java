@@ -16,8 +16,8 @@ import com.rabbitmq.client.QueueingConsumer;
  */
 public class ManualTest_MessagingBank {
     
-    private static final String QUEUE_NAME = "translator.group11.cphbusiness.messagingBank" ;//"group11.GetBanks";
-	private static final String REPLY_QUEUE_NAME = "normalizer.group11";//"group11.GetBanksReply";
+    private static final String QUEUE_NAME = "translator.group11.cphbusiness.messagingBank" ;
+	private static final String REPLY_QUEUE_NAME = "normalizer.group11";
 
 	public static void main(String[] argv) throws Exception {
 		send();

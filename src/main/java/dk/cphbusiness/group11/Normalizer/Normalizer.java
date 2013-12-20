@@ -28,9 +28,10 @@ public abstract class Normalizer extends Thread {
 		Connection connection = factory.newConnection();
 		Channel channel = connection.createChannel();
 
-		channel.exchangeDeclare(queue, "fanout");
-		String queueName = channel.queueDeclare().getQueue();
-		channel.queueBind(queueName, queue, "");
+                channel.exchangeDeclare(queue, "fanout");
+                String queueName = channel.queueDeclare(queue,false,  false, false, null).getQueue();
+                channel.queueBind(queueName, queue, "");
+
 		System.out.println(" [*] Waiting for messages on queue: " + queue);
 
 		consumer = new QueueingConsumer(channel);

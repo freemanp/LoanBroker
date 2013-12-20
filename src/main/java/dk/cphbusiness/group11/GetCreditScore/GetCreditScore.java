@@ -75,7 +75,7 @@ public class GetCreditScore {
         AMQP.BasicProperties properties = propertiesBuilder.build();
         
         System.out.println("Sending to queue '" + SENDING_QUEUE + "' message: " + xmlReturnMessage);
-        channel.basicPublish(SENDING_QUEUE, "", properties, xmlReturnMessage.getBytes());
+        channel.basicPublish("", SENDING_QUEUE, properties, xmlReturnMessage.getBytes());
     }
     
     public void run() throws Exception{

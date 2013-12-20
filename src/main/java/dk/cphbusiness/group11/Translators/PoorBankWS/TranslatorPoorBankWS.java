@@ -6,27 +6,25 @@
 
 package dk.cphbusiness.group11.Translators.PoorBankWS;
 
-import com.rabbitmq.client.AMQP;
+import java.io.ByteArrayInputStream;
+
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.xpath.XPath;
+import javax.xml.xpath.XPathConstants;
+import javax.xml.xpath.XPathFactory;
+
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.Connection;
 import com.rabbitmq.client.ConnectionFactory;
 import com.rabbitmq.client.QueueingConsumer;
-import java.io.ByteArrayInputStream;
-import java.io.StringWriter;
-import java.text.SimpleDateFormat;
-import java.util.Calendar;
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.transform.Transformer;
-import javax.xml.transform.TransformerFactory;
-import javax.xml.transform.dom.DOMSource;
-import javax.xml.transform.stream.StreamResult;
-import javax.xml.xpath.XPath;
-import javax.xml.xpath.XPathConstants;
-import javax.xml.xpath.XPathFactory;
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-import dk.cphbusiness.group11.PoorBankWS.*;
+
+import dk.cphbusiness.group11.PoorBankWS.PoorBankService;
+import dk.cphbusiness.group11.PoorBankWS.PoorBankService_Service;
+import dk.cphbusiness.group11.PoorBankWS.PoorLoanResponsee;
 
 /**
  *
@@ -34,7 +32,7 @@ import dk.cphbusiness.group11.PoorBankWS.*;
  */
 public class TranslatorPoorBankWS {
     private static final String RECEIVING_QUEUE = "translator.group11.PoorBankWS";
-    private static final String SENDING_QUEUE = "normalizer.group11";
+    private static final String SENDING_QUEUE = "normalizer.group11.webServiceBank";
     private boolean isRunning;
     
     public TranslatorPoorBankWS(){

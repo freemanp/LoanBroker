@@ -58,8 +58,8 @@ public class RecipientList {
         translatorMap = new HashMap<String, String>();
         translatorMap.put("cphbusiness.bankXML", "translator.group11.cphbusiness.bankXML");
         translatorMap.put("cphbusiness.bankJSON", "translator.group11.cphbusiness.bankJSON");
-        translatorMap.put("group11.poorBankXML", "translator.group11.poorBankXML");
-        translatorMap.put("group11.webServiceBank", "translator.group11.webServiceBank");
+        translatorMap.put("group11.poorBankWS", "translator.group11.PoorBankWS");
+        translatorMap.put("group11.messagingBank", "translator.group11.cphbusiness.messagingBank");
     }
     
     public void run() throws Exception{

@@ -28,7 +28,7 @@ import com.rabbitmq.client.QueueingConsumer;
 public class TranslatorCphbusinessBankXML {
     private static final String RECEIVING_QUEUE = "translator.group11.cphbusiness.bankXML";
     private static final String SENDING_QUEUE = "cphbusiness.bankXML";
-    private static final String REPLY_TO_QUEUE = "normalizer.group11";
+    private static final String REPLY_TO_QUEUE = "normalizer.group11.bankXML";
     private boolean isRunning;
     
     public TranslatorCphbusinessBankXML(){

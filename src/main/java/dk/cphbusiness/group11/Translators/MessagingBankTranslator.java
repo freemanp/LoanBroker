@@ -28,7 +28,7 @@ import com.rabbitmq.client.QueueingConsumer;
 public class MessagingBankTranslator {
     private static final String RECEIVING_QUEUE = "translator.group11.cphbusiness.messagingBank";
     private static final String SENDING_QUEUE = "group11.messagingBank";
-    private static final String REPLY_TO_QUEUE = "normalizer.group11";
+    private static final String REPLY_TO_QUEUE = "normalizer.group11.messagingBank";
     private boolean isRunning;
     
     public MessagingBankTranslator(){
@@ -41,13 +41,13 @@ public class MessagingBankTranslator {
         
         Document loanRequestXml = builder.parse(new ByteArrayInputStream(xmlMessage.getBytes()));
         XPath xPath = XPathFactory.newInstance().newXPath();
-        Element loanDetailsElement = (Element) xPath.compile("/LoanRequest").evaluate(loanRequestXml, XPathConstants.NODE);
+        Element loanDetailsElement = (Element) xPath.compile("/LoanDetails").evaluate(loanRequestXml, XPathConstants.NODE);
         String ssn = loanDetailsElement.getElementsByTagName("ssn").item(0).getTextContent();
         String creditScore = loanDetailsElement.getElementsByTagName("creditScore").item(0).getTextContent();
         String loanAmount = loanDetailsElement.getElementsByTagName("loanAmount").item(0).getTextContent();
       
         
-        String temp = loanDetailsElement.getElementsByTagName("loanDuration").item(0).getTextContent();
+        String temp = loanDetailsElement.getElementsByTagName("loanDurationInMonths").item(0).getTextContent();
         int loanDurationInMonths = Integer.parseInt(temp);
         
         Document bankRequestXml = builder.newDocument();

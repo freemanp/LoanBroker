@@ -48,8 +48,9 @@ public class MessageProcessor {
 		this.message = message;
 		banks = new ArrayList<Bank>();
 		availableBanks = new ArrayList<Bank>();
-		availableBanks.add(new Bank("cphbusiness.bankJSON", 700));
-		availableBanks.add(new Bank("cphbusiness.bankXML", 400));
+		availableBanks.add(new Bank("cphbusiness.bankJSON", 0));
+		availableBanks.add(new Bank("cphbusiness.bankXML", 0));
+		availableBanks.add(new Bank("group11.poorBankWS", 0));
 		availableBanks.add(new Bank("group11.messagingBank", 0));
 	}
 
@@ -71,10 +72,9 @@ public class MessageProcessor {
 					.createXMLEventReader(new ByteArrayInputStream(message
 							.getBytes()));
 
-			boolean lookingForCreditScore = true;
 			creditScore = -1;
 
-			while (eventReader.hasNext() && lookingForCreditScore) {
+			while (eventReader.hasNext()) {
 				XMLEvent event = eventReader.nextEvent();
 
 				if (event.isStartElement()) {
@@ -84,7 +84,6 @@ public class MessageProcessor {
 					if (partName.equals(XML_CREDIT_SCORE_ELEMENT)) {
 						creditScore = Integer.parseInt(eventReader.nextEvent()
 								.asCharacters().getData());
-						lookingForCreditScore = false;
 					} else if (partName.equals(XML_SSN_ELEMENT)) {
 						ssn = eventReader.nextEvent().asCharacters().getData();
 					} else if (partName.equals(XML_LOAN_AMOUNT_ELEMENT)) {

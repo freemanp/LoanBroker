@@ -57,11 +57,11 @@ public class NormalizerMessagingBank extends Normalizer {
 				StartElement startElement = event.asStartElement();
 				if (startElement.getName().getLocalPart().equals(SSN_FIELD)) {
 					event = eventReader.nextEvent();
-					interestRate = event.asCharacters().getData();
+					ssn = event.asCharacters().getData();
 				} else if (startElement.getName().getLocalPart()
 						.equals(INTEREST_RATE_FIELD)) {
 					event = eventReader.nextEvent();
-					ssn = event.asCharacters().getData();
+					interestRate = event.asCharacters().getData();
 				}
 			}
 		}

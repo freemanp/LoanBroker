@@ -25,7 +25,7 @@ import com.rabbitmq.client.QueueingConsumer;
 public class TranslatorCphbusinessBankJSON {
     private static final String RECEIVING_QUEUE = "translator.group11.cphbusiness.bankJSON";
     private static final String SENDING_QUEUE = "cphbusiness.bankJSON";
-    private static final String REPLY_TO_QUEUE = "normalizer.group11";
+    private static final String REPLY_TO_QUEUE = "normalizer.group11.bankJSON";
     private boolean isRunning;
     
     public TranslatorCphbusinessBankJSON(){

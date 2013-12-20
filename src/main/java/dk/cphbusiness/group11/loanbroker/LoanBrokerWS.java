@@ -6,11 +6,14 @@
 
 package dk.cphbusiness.group11.loanbroker;
 
+import com.rabbitmq.client.AMQP;
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.Connection;
+import com.rabbitmq.client.ConnectionFactory;
+import java.io.IOException;
 import javax.jws.WebService;
 import javax.jws.WebMethod;
 import javax.jws.WebParam;
-import javax.xml.ws.WebServiceRef;
-import org.bank.services.credit.web.services.CreditScoreService_Service;
 
 /**
  *
@@ -18,8 +21,8 @@ import org.bank.services.credit.web.services.CreditScoreService_Service;
  */
 @WebService(serviceName = "LoanBrokerWS")
 public class LoanBrokerWS {
-    @WebServiceRef(wsdlLocation = "WEB-INF/wsdl/datdb.cphbusiness.dk_8080/CreditBureau/CreditScoreService.wsdl")
-    private CreditScoreService_Service service;
+    private static final String RECEIVING_QUEUE = "cphbusiness.group11.LoanBroakerWS";
+    private static final String SENDING_QUEUE = "cphbusiness.group11.GetCreditScore";
 
     /**
      * This is a sample web service operation
@@ -33,15 +36,27 @@ public class LoanBrokerWS {
      * Web service operation
      */
     @WebMethod(operationName = "LoanRequest")
-    public String LoanRequest(@WebParam(name = "ssn") String ssn, @WebParam(name = "amount") double amount) {
+    public String LoanRequest(@WebParam(name = "ssn") String ssn, @WebParam(name = "loanAmount") double loanAmount, @WebParam(name = "loanDurationInMonths") int loanDurationInMonths) throws Exception {
+        String xmlMessage = "<LoanRequest>\n" +
+                "   <loanAmount>" + loanAmount + "</loanAmount> \n" +
+                "   <loanDurationInMonths>" + loanDurationInMonths + "</loanDurationInMonths> \n" +
+                "   <ssn>" + ssn + "</ssn> \n" +
+                "</LoanRequest>";
         
-        return "Your credit score is " + creditScore(ssn);
+        System.out.println("Received loan request");
+        
+        ConnectionFactory factory = new ConnectionFactory();
+        factory.setHost("datdb.cphbusiness.dk");
+        Connection connection = factory.newConnection();
+        Channel channel = connection.createChannel();
+
+        channel.exchangeDeclare(SENDING_QUEUE, "fanout");
+        
+        System.out.println("Sending to queue '" + SENDING_QUEUE + "' message: " + xmlMessage);
+        channel.basicPublish(SENDING_QUEUE, "", null, xmlMessage.getBytes());
+        
+        return "";
     }
 
-    private int creditScore(java.lang.String ssn) {
-        // Note that the injected javax.xml.ws.Service reference as well as port objects are not thread safe.
-        // If the calling of port operations may lead to race condition some synchronization is required.
-        org.bank.services.credit.web.services.CreditScoreService port = service.getCreditScoreServicePort();
-        return port.creditScore(ssn);
-    }
+    
 }

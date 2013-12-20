@@ -1,0 +1,2271 @@
+package dk.cphbusiness.group11.Aggregator;
+/*
+ * expects:
+ * 	<LoanResponse>
+ *		<interestRate>5.5</interestRate>
+ *		<ssn>1605789787</ssn>
+ *		<bank>cphbusiness.bankXML</bank>
+ *	</LoanResponse>
+ * returns:
+ * 	<LoanResponse>
+ *		<interestRate>5.5</interestRate>
+ *		<ssn>1605789787</ssn>
+ *		<bank>cphbusiness.bankXML</bank>
+ *	</LoanResponse>
+ */
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.Connection;
+import com.rabbitmq.client.ConnectionFactory;
+import com.rabbitmq.client.QueueingConsumer;
+import dk.cphbusiness.group11.PoorBankWS.PoorBankService;
+import dk.cphbusiness.group11.PoorBankWS.PoorBankService_Service;
+import dk.cphbusiness.group11.PoorBankWS.PoorLoanResponsee;
+import java.io.ByteArrayInputStream;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.xpath.XPath;
+import javax.xml.xpath.XPathConstants;
+import javax.xml.xpath.XPathFactory;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+
+public class Aggregator {
+    private HashMap<String, List<LoanResponseDetails>> activeLoanRequests;
+    private static final String RECEIVING_QUEUE = "aggregator.group11";
+    private static final String SENDING_QUEUE = "group11.loanRequest.response";
+    private boolean isRunning;
+    
+    public Aggregator(){
+        this.activeLoanRequests = new HashMap<String, List<LoanResponseDetails>>();
+        this.isRunning = true;
+    }
+    
+    private void parseAndProcessXmlMessage(String xmlMessage) throws Exception{
+        DocumentBuilderFactory builderFactory = DocumentBuilderFactory.newInstance();
+        DocumentBuilder builder = builderFactory.newDocumentBuilder();
+        
+        Document loanRequestXml = builder.parse(new ByteArrayInputStream(xmlMessage.getBytes()));
+        XPath xPath = XPathFactory.newInstance().newXPath();
+        Element loanDetailsElement = (Element) xPath.compile("/LoanResponse").evaluate(loanRequestXml, XPathConstants.NODE);
+        String ssn = loanDetailsElement.getElementsByTagName("ssn").item(0).getTextContent();
+        double interestRate = Double.parseDouble(loanDetailsElement.getElementsByTagName("interestRate").item(0).getTextContent());
+        String bank = loanDetailsElement.getElementsByTagName("bank").item(0).getTextContent();
+        
+        LoanResponseDetails loanResponseDetails = new LoanResponseDetails(ssn, bank, interestRate);
+        
+        //wait until there are 4 responses, figure out the best and send a response
+        List<LoanResponseDetails> currentLoanRequestList = this.activeLoanRequests.get(ssn);
+        if (currentLoanRequestList != null){
+            if (currentLoanRequestList.size() >= 3){
+                LoanResponseDetails bestLoanResponse = currentLoanRequestList.get(0);
+                
+                for (int i = 1; i < currentLoanRequestList.size(); i++){
+                    if (bestLoanResponse.getInterestRate() > currentLoanRequestList.get(i).getInterestRate()){
+                        bestLoanResponse = currentLoanRequestList.get(i);
+                    }
+                }
+                
+                ConnectionFactory factory = new ConnectionFactory();
+                factory.setHost("datdb.cphbusiness.dk");
+                Connection connection = factory.newConnection();
+                Channel channel = connection.createChannel();
+
+                channel.exchangeDeclare(SENDING_QUEUE, "fanout");
+
+                String xmlReturnMessage = "<LoanResponse>" + 
+                        "   <bank>" + bestLoanResponse.getBank() + "</bank> \n" +
+                        "   <interestRate>" + bestLoanResponse.getInterestRate() + "</interestRate> \n" +
+                        "   <ssn>" + bestLoanResponse.getSsn() + "</ssn> \n" +
+                        "</LoanResponse>";
+                
+                System.out.println("Sending message: " + xmlReturnMessage);
+                channel.basicPublish(SENDING_QUEUE, "", null, xmlReturnMessage.getBytes());
+            }
+            else {
+                currentLoanRequestList.add(loanResponseDetails);
+            }
+        }
+        else {
+            currentLoanRequestList = new ArrayList<LoanResponseDetails>();
+            currentLoanRequestList.add(loanResponseDetails);
+            
+            this.activeLoanRequests.put(ssn, currentLoanRequestList);
+        }
+    }
+    
+    public void run() throws Exception{
+        ConnectionFactory factory = new ConnectionFactory();
+        factory.setHost("datdb.cphbusiness.dk");
+        Connection connection = factory.newConnection();
+        Channel channel = connection.createChannel();
+
+        channel.exchangeDeclare(RECEIVING_QUEUE, "fanout");
+        String queueName = channel.queueDeclare(RECEIVING_QUEUE,false,  false, false, null).getQueue();
+        channel.queueBind(queueName, RECEIVING_QUEUE, "");
+        System.out.println("Waiting for messages on queue: " + RECEIVING_QUEUE);
+
+        QueueingConsumer consumer = new QueueingConsumer(channel);
+        channel.basicConsume(queueName, true, consumer);
+        
+        while (this.isRunning){
+            QueueingConsumer.Delivery delivery = consumer.nextDelivery();
+            String message = new String(delivery.getBody());
+
+            System.out.println("Received '" + message + "'");
+            
+            this.parseAndProcessXmlMessage(message);
+        }
+    }
+    
+    public static void main(String[] args) throws Exception {
+        Aggregator aggro = new Aggregator();
+        aggro.run();
+    }
+}
+package dk.cphbusiness.group11.Aggregator;
+
+public class LoanResponseDetails {
+    public LoanResponseDetails(){}
+    
+    public LoanResponseDetails(String ssn, String bank, double interestRate){
+        this.ssn = ssn;
+        this.bank = bank;
+        this.interestRate = interestRate;
+    }
+    
+    private String ssn;
+
+    public String getSsn() {
+        return ssn;
+    }
+
+    public void setSsn(String ssn) {
+        this.ssn = ssn;
+    }
+
+    private String bank;
+
+    public String getBank() {
+        return bank;
+    }
+
+    public void setBank(String bank) {
+        this.bank = bank;
+    }
+
+    private double interestRate;
+
+    public double getInterestRate() {
+        return interestRate;
+    }
+
+    public void setInterestRate(double interestRate) {
+        this.interestRate = interestRate;
+    }
+}
+/*
+ * To change this template, choose Tools | Templates
+ * and open the template in the editor.
+ */
+package dk.cphbusiness.group11.BankMessaging;
+
+import java.io.ByteArrayInputStream;
+import java.io.StringWriter;
+
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.transform.Transformer;
+import javax.xml.transform.TransformerFactory;
+import javax.xml.transform.dom.DOMSource;
+import javax.xml.transform.stream.StreamResult;
+import javax.xml.xpath.XPath;
+import javax.xml.xpath.XPathConstants;
+import javax.xml.xpath.XPathFactory;
+
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+
+import com.rabbitmq.client.AMQP.BasicProperties;
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.Connection;
+import com.rabbitmq.client.ConnectionFactory;
+import com.rabbitmq.client.QueueingConsumer;
+
+/**
+ *
+ * @author Anth
+ */
+public class MessagingBank {
+
+    private static final String EXCHANGE_NAME = "group11.messagingBank";
+    private static QueueingConsumer.Delivery delivery;
+
+    public static void main(String[] argv) throws Exception {
+
+        ConnectionFactory factory = new ConnectionFactory();
+        factory.setHost("datdb.cphbusiness.dk");
+        Connection connection = factory.newConnection();
+        Channel channel = connection.createChannel();
+
+        channel.exchangeDeclare(EXCHANGE_NAME, "fanout");
+        String queueName = channel.queueDeclare().getQueue();
+        channel.queueBind(queueName, EXCHANGE_NAME, "");
+        
+        System.out.println("Messaging Bank");
+        System.out.println(" [*] Waiting for messages. To exit press CTRL+C");
+
+        QueueingConsumer consumer = new QueueingConsumer(channel);
+        channel.basicConsume(queueName, true, consumer);
+        while (true) {
+            delivery = consumer.nextDelivery();
+            String message = new String(delivery.getBody());
+
+            System.out.println(" [x] Received '" + message + "'");
+
+            //process message
+            processMessage(message);
+        }
+    }
+
+    private static void processMessage(String message) throws Exception {
+        // read XML
+        DocumentBuilderFactory builderFactory = DocumentBuilderFactory.newInstance();
+        DocumentBuilder builder = builderFactory.newDocumentBuilder();
+        
+        Document loanRequestXml = builder.parse(new ByteArrayInputStream(message.getBytes()));
+        XPath xPath = XPathFactory.newInstance().newXPath();
+        Element loanDetailsElement = (Element) xPath.compile("/LoanRequest").evaluate(loanRequestXml, XPathConstants.NODE);
+        String ssn = loanDetailsElement.getElementsByTagName("ssn").item(0).getTextContent();
+        String creditScore = loanDetailsElement.getElementsByTagName("creditScore").item(0).getTextContent();
+        String loanAmount = loanDetailsElement.getElementsByTagName("loanAmount").item(0).getTextContent();
+        String temp = loanDetailsElement.getElementsByTagName("loanDuration").item(0).getTextContent();
+     //   int loanDurationInMonths = Integer.parseInt(temp);
+        
+        //String to int
+        int amount = Integer.parseInt(loanAmount);
+        int score = Integer.parseInt(creditScore);
+            
+        //get loan rate
+        float rate = getLoanRate(score);
+        
+        //change float rate to String
+        String interestRate = Float.toString(rate);
+        
+        // build reply message
+        // XML reply same format as the school bank xml
+        //            <LoanResponse>
+        //                <interestRate>4.5600000000000005</interestRate>
+        //                 <ssn>12345678</ssn>
+        //            </LoanResponse>
+        
+        
+        String replyMessage = "";
+        
+        Document bankRequestXml = builder.newDocument();
+        Element root = bankRequestXml.createElement("LoanResponse");
+        bankRequestXml.appendChild(root);
+        
+        Element element = bankRequestXml.createElement("interestRate");
+        element.appendChild(bankRequestXml.createTextNode(interestRate));
+        root.appendChild(element);
+        
+        element = bankRequestXml.createElement("ssn");
+        element.appendChild(bankRequestXml.createTextNode(ssn));
+        root.appendChild(element);
+        
+         StringWriter writer = new StringWriter();
+        Transformer transformer = TransformerFactory.newInstance().newTransformer();
+        transformer.transform(new DOMSource(root), new StreamResult(writer));
+        
+        
+        replyMessage = writer.toString();
+        
+        
+       
+        ConnectionFactory factory = new ConnectionFactory();
+        factory.setHost("datdb.cphbusiness.dk");
+        Connection connection = factory.newConnection();
+        Channel channel = connection.createChannel();
+
+        //get reply-to queue
+        BasicProperties props = delivery.getProperties();
+        BasicProperties replyProps = new BasicProperties.Builder()
+                .correlationId(props.getCorrelationId()).build();
+
+        channel.basicPublish("", props.getReplyTo(), replyProps, replyMessage.getBytes());
+        
+        System.out.println(" [x] Sent '" + message + "'");
+
+        channel.close();
+        connection.close();
+    }
+    
+    private static float getLoanRate(int creditScore){
+        
+        float rate = 0;
+        
+        rate = 5 / ((float)creditScore /800);
+        
+        return rate;
+        
+    }
+    
+}
+package dk.cphbusiness.group11.GetBanks;
+
+public class Bank {
+	private String id;
+	private int minimumCreditScore;
+	
+	public Bank(String id, int minimumCreditScore) {
+		this.id = id;
+		this.minimumCreditScore = minimumCreditScore;
+	}
+
+	public String getId() {
+		return id;
+	}
+
+	public int getMinimumCreditScore() {
+		return minimumCreditScore;
+	}
+}
+package dk.cphbusiness.group11.GetBanks;
+
+import com.rabbitmq.client.AMQP.BasicProperties;
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.Connection;
+import com.rabbitmq.client.ConnectionFactory;
+import com.rabbitmq.client.QueueingConsumer;
+
+public class GetBanks {
+
+	private static final String HOST_NAME = "datdb.cphbusiness.dk";
+	private static final String QUEUE_NAME = "group11.GetBanks";
+
+	private static Channel channel;
+	private static QueueingConsumer consumer;
+
+	public static void main(String[] args) throws Exception {
+		init();
+
+		while (true) {
+			consume();
+		}
+
+	}
+
+	private static void consume() throws Exception {
+		QueueingConsumer.Delivery delivery = consumer.nextDelivery();
+
+		BasicProperties props = delivery.getProperties();
+		BasicProperties replyProps = new BasicProperties.Builder()
+				.correlationId(props.getCorrelationId()).build();
+
+		String message = new String(delivery.getBody());
+		
+		System.out.println(message);
+
+		MessageProcessor messageProcessor = new MessageProcessor(message);
+		messageProcessor.processMessage();
+
+		String response = messageProcessor.getResponse();
+
+		channel.basicPublish("", props.getReplyTo(), replyProps,
+				response.getBytes());
+
+		channel.basicAck(delivery.getEnvelope().getDeliveryTag(), false);
+
+	}
+
+	private static void init() throws Exception {
+		ConnectionFactory factory = new ConnectionFactory();
+		factory.setHost(HOST_NAME);
+		factory.setPort(5672);
+		factory.setUsername("student");
+		factory.setPassword("cph");
+
+		Connection connection = factory.newConnection();
+		channel = connection.createChannel();
+
+		channel.queueDeclare(QUEUE_NAME, false, false, false, null);
+
+		channel.basicQos(1);
+
+		consumer = new QueueingConsumer(channel);
+
+		channel.basicConsume(QUEUE_NAME, false, consumer);
+	}
+
+}
+/*
+ * XML parsing:
+ * http://www.vogella.com/articles/JavaXML/article.html
+ */
+package dk.cphbusiness.group11.GetBanks;
+
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.util.ArrayList;
+
+import javax.xml.stream.XMLEventFactory;
+import javax.xml.stream.XMLEventReader;
+import javax.xml.stream.XMLEventWriter;
+import javax.xml.stream.XMLInputFactory;
+import javax.xml.stream.XMLOutputFactory;
+import javax.xml.stream.XMLStreamException;
+import javax.xml.stream.events.XMLEvent;
+
+import dk.cphbusiness.group11.GetBanks.exceptions.GetBankCreditScoreException;
+import dk.cphbusiness.group11.GetBanks.exceptions.GetBankException;
+import dk.cphbusiness.group11.GetBanks.exceptions.GetBankParseException;
+import dk.cphbusiness.group11.GetBanks.exceptions.GetBankWritingException;
+
+public class MessageProcessor {
+
+	private static final String XML_ROOT_ELEMENT = "RecipientListRequest";
+	private static final String XML_LOAN_ELEMENT = "LoanDetails";
+	private static final String XML_SSN_ELEMENT = "ssn";
+	private static final String XML_CREDIT_SCORE_ELEMENT = "creditScore";
+	private static final String XML_LOAN_AMOUNT_ELEMENT = "loanAmount";
+	private static final String XML_LOAN_DURATION_IN_MONTHS_ELEMENT = "loanDurationInMonths";
+	private static final String XML_BANK_LIST_ELEMENT = "BankList";
+	private static final String XML_BANK_ELEMENT = "bank";
+
+	private XMLEvent endLine;
+	private XMLEvent tab;
+
+	private int creditScore;
+	private ArrayList<Bank> availableBanks;
+	private ArrayList<Bank> banks;
+	private String response;
+	private String message;
+	private String ssn;
+	private String loanAmount;
+	private String loanDurationInMonths;
+
+	public MessageProcessor(String message) {
+		this.message = message;
+		banks = new ArrayList<Bank>();
+		availableBanks = new ArrayList<Bank>();
+		availableBanks.add(new Bank("cphbusiness.bankJSON", 0));
+		availableBanks.add(new Bank("cphbusiness.bankXML", 0));
+		availableBanks.add(new Bank("group11.poorBankWS", 0));
+		availableBanks.add(new Bank("group11.messagingBank", 0));
+	}
+
+	public void processMessage() {
+		try {
+			parseXML();
+			getBanks();
+			writeMessage();
+		} catch (GetBankException e) {
+			response = e.getMessage();
+		}
+	}
+
+	private void parseXML() throws GetBankParseException {
+		XMLInputFactory inputFactory = XMLInputFactory.newInstance();
+		XMLEventReader eventReader;
+		try {
+			eventReader = inputFactory
+					.createXMLEventReader(new ByteArrayInputStream(message
+							.getBytes()));
+
+			creditScore = -1;
+
+			while (eventReader.hasNext()) {
+				XMLEvent event = eventReader.nextEvent();
+
+				if (event.isStartElement()) {
+					String partName = event.asStartElement().getName()
+							.getLocalPart();
+
+					if (partName.equals(XML_CREDIT_SCORE_ELEMENT)) {
+						creditScore = Integer.parseInt(eventReader.nextEvent()
+								.asCharacters().getData());
+					} else if (partName.equals(XML_SSN_ELEMENT)) {
+						ssn = eventReader.nextEvent().asCharacters().getData();
+					} else if (partName.equals(XML_LOAN_AMOUNT_ELEMENT)) {
+						loanAmount = eventReader.nextEvent().asCharacters()
+								.getData();
+					} else if (partName
+							.equals(XML_LOAN_DURATION_IN_MONTHS_ELEMENT)) {
+						loanDurationInMonths = eventReader.nextEvent()
+								.asCharacters().getData();
+					}
+				}
+			}
+		} catch (XMLStreamException e) {
+			throw new GetBankParseException(e.getMessage());
+		}
+	}
+
+	private void getBanks() throws GetBankCreditScoreException {
+		if (0 <= creditScore && creditScore <= 800) {
+			banks = new ArrayList<Bank>();
+			for (int i = 0; i < availableBanks.size(); i++) {
+				if (availableBanks.get(i).getMinimumCreditScore() <= creditScore) {
+					banks.add(availableBanks.get(i));
+				}
+			}
+		} else {
+			throw new GetBankCreditScoreException("" + creditScore);
+		}
+	}
+
+	private void writeMessage() throws GetBankWritingException {
+		// create an XMLOutputFactory
+		XMLOutputFactory outputFactory = XMLOutputFactory.newInstance();
+
+		ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+
+		// create XMLEventWriter
+		XMLEventWriter eventWriter;
+		try {
+			eventWriter = outputFactory.createXMLEventWriter(outputStream);
+			// create an EventFactory
+			XMLEventFactory eventFactory = XMLEventFactory.newInstance();
+			
+			endLine = eventFactory.createDTD("\n");
+			tab = eventFactory.createDTD("\t");
+
+			// create and write Start Tag
+			eventWriter.add(eventFactory.createStartDocument());
+
+			eventWriter.add(endLine);
+			eventWriter.add(eventFactory.createStartElement("", "",
+					XML_ROOT_ELEMENT));
+			eventWriter.add(endLine);
+
+			writeLoanToXML(eventWriter, eventFactory);
+			
+			eventWriter.add(tab);
+			eventWriter.add(eventFactory.createStartElement("", "",
+					XML_BANK_LIST_ELEMENT));
+			eventWriter.add(endLine);
+			
+			for (int i = 0; i < banks.size(); i++) {
+				eventWriter.add(tab);
+				eventWriter.add(tab);
+				eventWriter.add(eventFactory.createStartElement("", "",
+						XML_BANK_ELEMENT));
+				eventWriter.add(eventFactory.createCharacters(banks.get(i).getId()));
+				eventWriter.add(eventFactory.createEndElement("", "",
+						XML_BANK_ELEMENT));
+				eventWriter.add(endLine);
+			}
+			
+			eventWriter.add(tab);
+			eventWriter.add(eventFactory.createEndElement("", "",
+					XML_BANK_LIST_ELEMENT));
+			eventWriter.add(endLine);
+
+			eventWriter.add(eventFactory.createEndElement("", "",
+					XML_ROOT_ELEMENT));
+			eventWriter.add(endLine);
+			eventWriter.add(eventFactory.createEndDocument());
+			eventWriter.close();
+
+			response = outputStream.toString();
+		} catch (XMLStreamException e) {
+			throw new GetBankWritingException(e.getMessage());
+		}
+
+	}
+
+	private void writeLoanToXML(XMLEventWriter eventWriter,
+			XMLEventFactory eventFactory) throws XMLStreamException {
+		eventWriter.add(tab);
+		eventWriter.add(eventFactory.createStartElement("", "",
+				XML_LOAN_ELEMENT));
+		eventWriter.add(endLine);
+
+		eventWriter.add(tab);
+		eventWriter.add(tab);
+		eventWriter.add(eventFactory
+				.createStartElement("", "", XML_SSN_ELEMENT));
+		eventWriter.add(eventFactory.createCharacters(ssn));
+		eventWriter.add(eventFactory.createEndElement("", "", XML_SSN_ELEMENT));
+		eventWriter.add(endLine);
+
+		eventWriter.add(tab);
+		eventWriter.add(tab);
+		eventWriter.add(eventFactory.createStartElement("", "",
+				XML_CREDIT_SCORE_ELEMENT));
+		eventWriter.add(eventFactory.createCharacters("" + creditScore));
+		eventWriter.add(eventFactory.createEndElement("", "",
+				XML_CREDIT_SCORE_ELEMENT));
+		eventWriter.add(endLine);
+
+		eventWriter.add(tab);
+		eventWriter.add(tab);
+		eventWriter.add(eventFactory.createStartElement("", "",
+				XML_LOAN_AMOUNT_ELEMENT));
+		eventWriter.add(eventFactory.createCharacters(loanAmount));
+		eventWriter.add(eventFactory.createEndElement("", "",
+				XML_LOAN_AMOUNT_ELEMENT));
+		eventWriter.add(endLine);
+
+		eventWriter.add(tab);
+		eventWriter.add(tab);
+		eventWriter.add(eventFactory.createStartElement("", "",
+				XML_LOAN_DURATION_IN_MONTHS_ELEMENT));
+		eventWriter.add(eventFactory
+				.createCharacters(loanDurationInMonths));
+		eventWriter.add(eventFactory.createEndElement("", "",
+				XML_LOAN_DURATION_IN_MONTHS_ELEMENT));
+		eventWriter.add(endLine);
+
+		eventWriter.add(tab);
+		eventWriter
+				.add(eventFactory.createEndElement("", "", XML_LOAN_ELEMENT));
+		eventWriter.add(endLine);
+	}
+
+	public String getResponse() {
+		return response;
+	}
+}
+package dk.cphbusiness.group11.GetBanks.exceptions;
+
+public class GetBankCreditScoreException extends GetBankException {
+
+	private static final long serialVersionUID = 1L;
+	
+	public GetBankCreditScoreException(String errMsg) {
+		super(errMsg);
+	}
+	
+	@Override
+	public String getMessage() {
+		
+		return "ERROR: Invalid credit score: " + errMsg + "\nCredit score must be between 0 and 800.";
+	}
+}
+package dk.cphbusiness.group11.GetBanks.exceptions;
+
+public class GetBankException extends Exception {
+	private static final long serialVersionUID = 1L;
+
+	protected String errMsg;
+	
+	public GetBankException(String errMsg) {
+		super();
+		this.errMsg = errMsg;
+	}
+
+	@Override
+	public String getMessage() {
+		return "ERROR: " + errMsg;
+	}
+
+	@Override
+	public String toString() {
+		return this.getMessage();
+	}
+}
+package dk.cphbusiness.group11.GetBanks.exceptions;
+
+public class GetBankParseException extends GetBankException {
+
+	private static final long serialVersionUID = 1L;
+	
+	public GetBankParseException(String errMsg) {
+		super(errMsg);
+	}
+	
+	@Override
+	public String getMessage() {
+		return "ERROR: XML is incorrectly formatted (" + errMsg + ").";
+	}
+}
+package dk.cphbusiness.group11.GetBanks.exceptions;
+
+public class GetBankWritingException extends GetBankException {
+	private static final long serialVersionUID = 1L;
+	
+	public GetBankWritingException(String errMsg) {
+		super(errMsg);
+	}
+	
+	@Override
+	public String getMessage() {
+		return "ERROR: Could not write XML (" + errMsg + ")";
+	}
+}
+/*
+ * REMEMBER TO LAUNCH GetBanks.java before
+ */
+package dk.cphbusiness.group11.GetBanks.manualTest;
+
+import com.rabbitmq.client.AMQP.BasicProperties;
+import com.rabbitmq.client.AMQP.BasicProperties.Builder;
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.Connection;
+import com.rabbitmq.client.ConnectionFactory;
+import com.rabbitmq.client.QueueingConsumer;
+
+public class ManualTest {
+
+	private static final String QUEUE_NAME = "group11.GetBanks";
+	private static final String REPLY_QUEUE_NAME = "group11.GetBanksReply";
+
+	public static void main(String[] argv) throws Exception {
+		send();
+		receive();
+	}
+
+	private static void receive() throws Exception {
+		ConnectionFactory factory = new ConnectionFactory();
+		factory.setHost("datdb.cphbusiness.dk");
+		Connection connection = factory.newConnection();
+		Channel channel = connection.createChannel();
+
+		String queueName = channel.queueDeclare(REPLY_QUEUE_NAME, false, false,
+				false, null).getQueue();
+		System.out.println(" [*] Waiting for the message");
+
+		QueueingConsumer consumer = new QueueingConsumer(channel);
+		channel.basicConsume(queueName, true, consumer);
+		QueueingConsumer.Delivery delivery = consumer.nextDelivery();
+		String message = new String(delivery.getBody());
+
+		System.out.println(" [x] Received '" + message + "'");
+	}
+
+	private static void send() throws Exception {
+		ConnectionFactory factory = new ConnectionFactory();
+		factory.setHost("datdb.cphbusiness.dk");
+		Connection connection = factory.newConnection();
+		Channel channel = connection.createChannel();
+
+		channel.queueDeclare(QUEUE_NAME, false, false, false, null);
+
+		Builder propertiesBuilder = new BasicProperties.Builder();
+		propertiesBuilder.replyTo(REPLY_QUEUE_NAME);
+		BasicProperties properties = propertiesBuilder.build();
+
+		String message = "<LoanDetails><ssn>1234567890</ssn>"
+				+ "<creditScore>585</creditScore>"
+				+ "<loanAmount>1000.0</loanAmount><loanDurationInMonths>36</loanDurationInMonths>"
+				+ "</LoanDetails>";
+
+		channel.basicPublish("", QUEUE_NAME, properties, message.getBytes());
+		System.out.println(" [x] Sent '" + message + "'");
+
+		channel.close();
+		connection.close();
+	}
+}
+package dk.cphbusiness.group11.GetCreditScore;
+
+/**
+ * expects:
+ * 	<LoanRequest>
+ *		<loanAmount>5.5</loanAmount>
+ *		<loanDurationInMonths>60</loanDurationInMonths>
+ *		<ssn>1605789787</ssn>
+ *	</LoanRequest>
+ * returns:
+ * 	<LoanRequest>
+ *		<loanAmount>5.5</loanAmount>
+ *		<loanDurationInMonths>60</loanDurationInMonths>
+ *		<ssn>1605789787</ssn>
+ *		<creditScore>1605789787</creditScore>
+ *	</LoanRequest>
+ */
+
+import com.rabbitmq.client.AMQP;
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.Connection;
+import com.rabbitmq.client.ConnectionFactory;
+import com.rabbitmq.client.QueueingConsumer;
+import java.io.ByteArrayInputStream;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.ws.WebServiceRef;
+import javax.xml.xpath.XPath;
+import javax.xml.xpath.XPathConstants;
+import javax.xml.xpath.XPathFactory;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.bank.services.credit.web.services.CreditScoreService_Service;
+
+public class GetCreditScore {
+    private static final String RECEIVING_QUEUE = "cphbusiness.group11.GetCreditScore";
+    private static final String REPLY_TO_QUEUE = "loanbroker.group11.recipientList";
+    private static final String SENDING_QUEUE = "group11.GetBanks";
+    private boolean isRunning;
+    
+    @WebServiceRef(wsdlLocation = "WEB-INF/wsdl/datdb.cphbusiness.dk_8080/CreditBureau/CreditScoreService.wsdl")
+    private CreditScoreService_Service service;
+    
+    public GetCreditScore(){
+        this.isRunning = true;
+    }
+    
+    private void parseAndProcessXmlMessage(String xmlMessage) throws Exception{
+        DocumentBuilderFactory builderFactory = DocumentBuilderFactory.newInstance();
+        DocumentBuilder builder = builderFactory.newDocumentBuilder();
+        
+        Document loanRequestXml = builder.parse(new ByteArrayInputStream(xmlMessage.getBytes()));
+        XPath xPath = XPathFactory.newInstance().newXPath();
+        Element loanDetailsElement = (Element) xPath.compile("/LoanRequest").evaluate(loanRequestXml, XPathConstants.NODE);
+        String ssn = loanDetailsElement.getElementsByTagName("ssn").item(0).getTextContent();
+        String loanAmount = loanDetailsElement.getElementsByTagName("loanAmount").item(0).getTextContent();
+        String loanDurationInMonths = loanDetailsElement.getElementsByTagName("loanDurationInMonths").item(0).getTextContent();
+        int creditScore = this.creditScore(ssn);
+      
+        String xmlReturnMessage = "<LoanRequest>\n" +
+                "   <loanAmount>" + loanAmount + "</loanAmount> \n" +
+                "   <loanDurationInMonths>" + loanDurationInMonths + "</loanDurationInMonths> \n" +
+                "   <creditScore>" + creditScore + "</creditScore> \n" +
+                "   <ssn>" + ssn + "</ssn> \n" +
+                "</LoanRequest>";
+        
+        ConnectionFactory factory = new ConnectionFactory();
+        factory.setHost("datdb.cphbusiness.dk");
+        Connection connection = factory.newConnection();
+        Channel channel = connection.createChannel();
+
+        channel.exchangeDeclare(SENDING_QUEUE, "fanout");
+        AMQP.BasicProperties.Builder propertiesBuilder = new AMQP.BasicProperties.Builder();
+        propertiesBuilder.replyTo(REPLY_TO_QUEUE);
+        AMQP.BasicProperties properties = propertiesBuilder.build();
+        
+        System.out.println("Sending to queue '" + SENDING_QUEUE + "' message: " + xmlReturnMessage);
+        channel.basicPublish("", SENDING_QUEUE, properties, xmlReturnMessage.getBytes());
+    }
+    
+    public void run() throws Exception{
+        ConnectionFactory factory = new ConnectionFactory();
+        factory.setHost("datdb.cphbusiness.dk");
+        Connection connection = factory.newConnection();
+        Channel channel = connection.createChannel();
+
+        channel.exchangeDeclare(RECEIVING_QUEUE, "fanout");
+        String queueName = channel.queueDeclare(RECEIVING_QUEUE,false,  false, false, null).getQueue();
+        channel.queueBind(queueName, RECEIVING_QUEUE, "");
+        System.out.println("GetCreditScore");
+        System.out.println("Waiting for messages on queue: " + RECEIVING_QUEUE);
+
+        QueueingConsumer consumer = new QueueingConsumer(channel);
+        channel.basicConsume(queueName, true, consumer);
+        
+        while (this.isRunning){
+            QueueingConsumer.Delivery delivery = consumer.nextDelivery();
+            String message = new String(delivery.getBody());
+
+            System.out.println("Received '" + message + "'");
+            
+            this.parseAndProcessXmlMessage(message);
+        }
+    }
+    
+    private int creditScore(java.lang.String ssn) throws Exception{
+        org.bank.services.credit.web.services.CreditScoreService_Service service = new org.bank.services.credit.web.services.CreditScoreService_Service();
+        org.bank.services.credit.web.services.CreditScoreService port = service.getCreditScoreServicePort();
+        // TODO process result here
+        int result = port.creditScore(ssn);
+
+        return result;
+    }
+    
+    public static void main(String[] args) throws Exception {
+        GetCreditScore gcs = new GetCreditScore();
+        gcs.run();
+    }
+}
+package dk.cphbusiness.group11.Normalizer.Banks;
+/*
+ * expects:
+ * 	{"interestRate":5.5,"ssn":1605789787}
+ * returns:
+ * 	<LoanResponse>
+ *		<interestRate>5.5</interestRate>
+ *		<ssn>1605789787</ssn>
+ *		<bank>cphbusiness.bankJSON</bank>
+ *	</LoanResponse>
+ */
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+
+import javax.json.Json;
+import javax.json.JsonObject;
+import javax.json.JsonReader;
+import javax.xml.stream.XMLEventFactory;
+import javax.xml.stream.XMLEventWriter;
+import javax.xml.stream.XMLOutputFactory;
+import javax.xml.stream.events.XMLEvent;
+
+import dk.cphbusiness.group11.Normalizer.Normalizer;
+
+public class NormalizerBankJSON extends Normalizer {
+
+	private static final String SSN_FIELD = "ssn";
+	private static final String INTEREST_RATE_FIELD = "interestRate";
+	private static final String BANK_FIELD = "bank";
+	private static final String XML_ROOT_ELEMENT = "LoanResponse";
+	
+	private static final String BANK = "cphbusiness.bankJSON";
+
+	public NormalizerBankJSON(String queue) throws Exception {
+		super(queue);
+	}
+
+	@Override
+	protected String processMessage(String message) throws Exception {
+		ByteArrayInputStream inputStream = new ByteArrayInputStream(
+				message.getBytes());
+		JsonReader jsonReader = Json.createReader(inputStream);
+		JsonObject jsonObject = jsonReader.readObject();
+
+		jsonReader.close();
+		inputStream.close();
+
+		String ssn = Integer.toString(jsonObject.getJsonNumber(SSN_FIELD).intValue());
+		
+		String interestRate = Double.toString(jsonObject.getJsonNumber(INTEREST_RATE_FIELD).doubleValue());
+
+		XMLOutputFactory outputFactory = XMLOutputFactory.newInstance();
+		ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+		XMLEventWriter eventWriter = outputFactory
+				.createXMLEventWriter(outputStream);
+		XMLEventFactory eventFactory = XMLEventFactory.newInstance();
+
+		XMLEvent endLine = eventFactory.createDTD("\n");
+		XMLEvent tab = eventFactory.createDTD("\t");
+
+		eventWriter.add(eventFactory.createStartDocument());
+
+		eventWriter.add(endLine);
+		eventWriter.add(eventFactory.createStartElement("", "",
+				XML_ROOT_ELEMENT));
+		eventWriter.add(endLine);
+
+		eventWriter.add(tab);
+		eventWriter.add(eventFactory.createStartElement("", "",
+				INTEREST_RATE_FIELD));
+		eventWriter.add(eventFactory.createCharacters(interestRate));
+		eventWriter.add(eventFactory.createEndElement("", "",
+				INTEREST_RATE_FIELD));
+		eventWriter.add(endLine);
+		
+		eventWriter.add(tab);
+		eventWriter.add(eventFactory.createStartElement("", "",
+				BANK_FIELD));
+		eventWriter.add(eventFactory.createCharacters(BANK));
+		eventWriter.add(eventFactory.createEndElement("", "",
+				BANK_FIELD));
+		eventWriter.add(endLine);
+
+		eventWriter.add(tab);
+		eventWriter.add(eventFactory.createStartElement("", "", SSN_FIELD));
+		eventWriter.add(eventFactory.createCharacters(ssn));
+		eventWriter.add(eventFactory.createEndElement("", "", SSN_FIELD));
+		eventWriter.add(endLine);
+
+		eventWriter
+				.add(eventFactory.createEndElement("", "", XML_ROOT_ELEMENT));
+		eventWriter.add(endLine);
+		eventWriter.add(eventFactory.createEndDocument());
+		eventWriter.close();
+
+		return outputStream.toString();
+	}
+}
+package dk.cphbusiness.group11.Normalizer.Banks;
+/*
+ * expects:
+ * 	<LoanResponse>
+ *		<interestRate>5.5</interestRate>
+ *		<ssn>1605789787</ssn>
+ *	</LoanResponse>
+ * returns:
+ * 	<LoanResponse>
+ *		<interestRate>5.5</interestRate>
+ *		<ssn>1605789787</ssn>
+ *		<bank>cphbusiness.bankXML</bank>
+ *	</LoanResponse>
+ */
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+
+import javax.xml.stream.XMLEventFactory;
+import javax.xml.stream.XMLEventReader;
+import javax.xml.stream.XMLEventWriter;
+import javax.xml.stream.XMLInputFactory;
+import javax.xml.stream.XMLOutputFactory;
+import javax.xml.stream.events.StartElement;
+import javax.xml.stream.events.XMLEvent;
+
+import dk.cphbusiness.group11.Normalizer.Normalizer;
+
+public class NormalizerBankXML extends Normalizer {
+
+	private static final String SSN_FIELD = "ssn";
+	private static final String INTEREST_RATE_FIELD = "interestRate";
+	private static final String BANK_FIELD = "bank";
+	private static final String XML_ROOT_ELEMENT = "LoanResponse";
+	
+	private static final String BANK = "cphbusiness.bankXML";
+
+	public NormalizerBankXML(String queue) throws Exception {
+		super(queue);
+	}
+
+	@Override
+	protected String processMessage(String message) throws Exception {
+		ByteArrayInputStream inputStream = new ByteArrayInputStream(
+				message.getBytes());
+
+		XMLInputFactory inputFactory = XMLInputFactory.newInstance();
+		XMLEventReader eventReader = inputFactory
+				.createXMLEventReader(inputStream);
+		
+		String interestRate = "";
+		String ssn = "";
+
+		while (eventReader.hasNext()) {
+			XMLEvent event = eventReader.nextEvent();
+
+			if (event.isStartElement()) {
+				StartElement startElement = event.asStartElement();
+				if (startElement.getName().getLocalPart().equals(SSN_FIELD)) {
+					event = eventReader.nextEvent();
+					ssn = event.asCharacters().getData();
+				} else if (startElement.getName().getLocalPart()
+						.equals(INTEREST_RATE_FIELD)) {
+					event = eventReader.nextEvent();
+					interestRate = event.asCharacters().getData();
+				}
+			}
+		}
+
+
+		XMLOutputFactory outputFactory = XMLOutputFactory.newInstance();
+		ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+		XMLEventWriter eventWriter = outputFactory
+				.createXMLEventWriter(outputStream);
+		XMLEventFactory eventFactory = XMLEventFactory.newInstance();
+
+		XMLEvent endLine = eventFactory.createDTD("\n");
+		XMLEvent tab = eventFactory.createDTD("\t");
+
+		eventWriter.add(eventFactory.createStartDocument());
+
+		eventWriter.add(endLine);
+		eventWriter.add(eventFactory.createStartElement("", "",
+				XML_ROOT_ELEMENT));
+		eventWriter.add(endLine);
+
+		eventWriter.add(tab);
+		eventWriter.add(eventFactory.createStartElement("", "",
+				INTEREST_RATE_FIELD));
+		eventWriter.add(eventFactory.createCharacters(interestRate));
+		eventWriter.add(eventFactory.createEndElement("", "",
+				INTEREST_RATE_FIELD));
+		eventWriter.add(endLine);
+		
+		eventWriter.add(tab);
+		eventWriter.add(eventFactory.createStartElement("", "",
+				BANK_FIELD));
+		eventWriter.add(eventFactory.createCharacters(BANK));
+		eventWriter.add(eventFactory.createEndElement("", "",
+				BANK_FIELD));
+		eventWriter.add(endLine);
+
+		eventWriter.add(tab);
+		eventWriter.add(eventFactory.createStartElement("", "", SSN_FIELD));
+		eventWriter.add(eventFactory.createCharacters(ssn));
+		eventWriter.add(eventFactory.createEndElement("", "", SSN_FIELD));
+		eventWriter.add(endLine);
+
+		eventWriter
+				.add(eventFactory.createEndElement("", "", XML_ROOT_ELEMENT));
+		eventWriter.add(endLine);
+		eventWriter.add(eventFactory.createEndDocument());
+		eventWriter.close();
+
+		return outputStream.toString();
+	}
+
+}
+package dk.cphbusiness.group11.Normalizer.Banks;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+
+import javax.xml.stream.XMLEventFactory;
+import javax.xml.stream.XMLEventReader;
+import javax.xml.stream.XMLEventWriter;
+import javax.xml.stream.XMLInputFactory;
+import javax.xml.stream.XMLOutputFactory;
+import javax.xml.stream.events.StartElement;
+import javax.xml.stream.events.XMLEvent;
+
+/*
+ * expects:
+ * 	<LoanResponse>
+ *		<interestRate>5.5</interestRate>
+ *		<ssn>1605789787</ssn>
+ *	</LoanResponse>
+ * returns:
+ * 	<LoanResponse>
+ *		<interestRate>5.5</interestRate>
+ *		<ssn>1605789787</ssn>
+ *		<bank>group11.messagingBank</bank>
+ *	</LoanResponse>
+ */
+import dk.cphbusiness.group11.Normalizer.Normalizer;
+
+public class NormalizerMessagingBank extends Normalizer {
+	
+	private static final String SSN_FIELD = "ssn";
+	private static final String INTEREST_RATE_FIELD = "interestRate";
+	private static final String BANK_FIELD = "bank";
+	private static final String XML_ROOT_ELEMENT = "LoanResponse";
+	
+	private static final String BANK = "group11.messagingBank";
+
+	public NormalizerMessagingBank(String queue) throws Exception {
+		super(queue);
+	}
+
+	@Override
+	protected String processMessage(String message) throws Exception {
+		ByteArrayInputStream inputStream = new ByteArrayInputStream(
+				message.getBytes());
+
+		XMLInputFactory inputFactory = XMLInputFactory.newInstance();
+		XMLEventReader eventReader = inputFactory
+				.createXMLEventReader(inputStream);
+		
+		String interestRate = "";
+		String ssn = "";
+
+		while (eventReader.hasNext()) {
+			XMLEvent event = eventReader.nextEvent();
+
+			if (event.isStartElement()) {
+				StartElement startElement = event.asStartElement();
+				if (startElement.getName().getLocalPart().equals(SSN_FIELD)) {
+					event = eventReader.nextEvent();
+					ssn = event.asCharacters().getData();
+				} else if (startElement.getName().getLocalPart()
+						.equals(INTEREST_RATE_FIELD)) {
+					event = eventReader.nextEvent();
+					interestRate = event.asCharacters().getData();
+				}
+			}
+		}
+
+
+		XMLOutputFactory outputFactory = XMLOutputFactory.newInstance();
+		ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+		XMLEventWriter eventWriter = outputFactory
+				.createXMLEventWriter(outputStream);
+		XMLEventFactory eventFactory = XMLEventFactory.newInstance();
+
+		XMLEvent endLine = eventFactory.createDTD("\n");
+		XMLEvent tab = eventFactory.createDTD("\t");
+
+		eventWriter.add(eventFactory.createStartDocument());
+
+		eventWriter.add(endLine);
+		eventWriter.add(eventFactory.createStartElement("", "",
+				XML_ROOT_ELEMENT));
+		eventWriter.add(endLine);
+
+		eventWriter.add(tab);
+		eventWriter.add(eventFactory.createStartElement("", "",
+				INTEREST_RATE_FIELD));
+		eventWriter.add(eventFactory.createCharacters(interestRate));
+		eventWriter.add(eventFactory.createEndElement("", "",
+				INTEREST_RATE_FIELD));
+		eventWriter.add(endLine);
+		
+		eventWriter.add(tab);
+		eventWriter.add(eventFactory.createStartElement("", "",
+				BANK_FIELD));
+		eventWriter.add(eventFactory.createCharacters(BANK));
+		eventWriter.add(eventFactory.createEndElement("", "",
+				BANK_FIELD));
+		eventWriter.add(endLine);
+
+		eventWriter.add(tab);
+		eventWriter.add(eventFactory.createStartElement("", "", SSN_FIELD));
+		eventWriter.add(eventFactory.createCharacters(ssn));
+		eventWriter.add(eventFactory.createEndElement("", "", SSN_FIELD));
+		eventWriter.add(endLine);
+
+		eventWriter
+				.add(eventFactory.createEndElement("", "", XML_ROOT_ELEMENT));
+		eventWriter.add(endLine);
+		eventWriter.add(eventFactory.createEndDocument());
+		eventWriter.close();
+
+		return outputStream.toString();
+	}
+
+}
+package dk.cphbusiness.group11.Normalizer.Banks;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+
+import javax.xml.stream.XMLEventFactory;
+import javax.xml.stream.XMLEventReader;
+import javax.xml.stream.XMLEventWriter;
+import javax.xml.stream.XMLInputFactory;
+import javax.xml.stream.XMLOutputFactory;
+import javax.xml.stream.events.StartElement;
+import javax.xml.stream.events.XMLEvent;
+
+/*
+ * expects:
+ * 	<LoanResponse>
+ *		<interestRate>5.5</interestRate>
+ *		<ssn>1605789787</ssn>
+ *	</LoanResponse>
+ * returns:
+ * 	<LoanResponse>
+ *		<interestRate>5.5</interestRate>
+ *		<ssn>1605789787</ssn>
+ *		<bank>group11.webServiceBank</bank>
+ *	</LoanResponse>
+ */
+import dk.cphbusiness.group11.Normalizer.Normalizer;
+
+public class NormalizerWebServiceBank extends Normalizer {
+	
+	private static final String SSN_FIELD = "ssn";
+	private static final String INTEREST_RATE_FIELD = "interestRate";
+	private static final String BANK_FIELD = "bank";
+	private static final String XML_ROOT_ELEMENT = "LoanResponse";
+	
+	private static final String BANK = "group11.webServiceBank";
+
+	public NormalizerWebServiceBank(String queue) throws Exception {
+		super(queue);
+	}
+
+	@Override
+	protected String processMessage(String message) throws Exception {
+		ByteArrayInputStream inputStream = new ByteArrayInputStream(
+				message.getBytes());
+
+		XMLInputFactory inputFactory = XMLInputFactory.newInstance();
+		XMLEventReader eventReader = inputFactory
+				.createXMLEventReader(inputStream);
+		
+		String interestRate = "";
+		String ssn = "";
+
+		while (eventReader.hasNext()) {
+			XMLEvent event = eventReader.nextEvent();
+
+			if (event.isStartElement()) {
+				StartElement startElement = event.asStartElement();
+				if (startElement.getName().getLocalPart().equals(SSN_FIELD)) {
+					event = eventReader.nextEvent();
+					ssn = event.asCharacters().getData();
+				} else if (startElement.getName().getLocalPart()
+						.equals(INTEREST_RATE_FIELD)) {
+					event = eventReader.nextEvent();
+					interestRate = event.asCharacters().getData();
+				}
+			}
+		}
+
+
+		XMLOutputFactory outputFactory = XMLOutputFactory.newInstance();
+		ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+		XMLEventWriter eventWriter = outputFactory
+				.createXMLEventWriter(outputStream);
+		XMLEventFactory eventFactory = XMLEventFactory.newInstance();
+
+		XMLEvent endLine = eventFactory.createDTD("\n");
+		XMLEvent tab = eventFactory.createDTD("\t");
+
+		eventWriter.add(eventFactory.createStartDocument());
+
+		eventWriter.add(endLine);
+		eventWriter.add(eventFactory.createStartElement("", "",
+				XML_ROOT_ELEMENT));
+		eventWriter.add(endLine);
+
+		eventWriter.add(tab);
+		eventWriter.add(eventFactory.createStartElement("", "",
+				INTEREST_RATE_FIELD));
+		eventWriter.add(eventFactory.createCharacters(interestRate));
+		eventWriter.add(eventFactory.createEndElement("", "",
+				INTEREST_RATE_FIELD));
+		eventWriter.add(endLine);
+		
+		eventWriter.add(tab);
+		eventWriter.add(eventFactory.createStartElement("", "",
+				BANK_FIELD));
+		eventWriter.add(eventFactory.createCharacters(BANK));
+		eventWriter.add(eventFactory.createEndElement("", "",
+				BANK_FIELD));
+		eventWriter.add(endLine);
+
+		eventWriter.add(tab);
+		eventWriter.add(eventFactory.createStartElement("", "", SSN_FIELD));
+		eventWriter.add(eventFactory.createCharacters(ssn));
+		eventWriter.add(eventFactory.createEndElement("", "", SSN_FIELD));
+		eventWriter.add(endLine);
+
+		eventWriter
+				.add(eventFactory.createEndElement("", "", XML_ROOT_ELEMENT));
+		eventWriter.add(endLine);
+		eventWriter.add(eventFactory.createEndDocument());
+		eventWriter.close();
+
+		return outputStream.toString();
+	}
+
+}
+package dk.cphbusiness.group11.Normalizer;
+
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.Connection;
+import com.rabbitmq.client.ConnectionFactory;
+import com.rabbitmq.client.QueueingConsumer;
+
+import dk.cphbusiness.group11.Normalizer.Banks.NormalizerBankJSON;
+import dk.cphbusiness.group11.Normalizer.Banks.NormalizerBankXML;
+import dk.cphbusiness.group11.Normalizer.Banks.NormalizerMessagingBank;
+import dk.cphbusiness.group11.Normalizer.Banks.NormalizerWebServiceBank;
+
+public abstract class Normalizer extends Thread {
+
+	private static final String JSON_BANK_QUEUE = "normalizer.group11.bankJSON";
+	private static final String XML_BANK_QUEUE = "normalizer.group11.bankXML";
+	private static final String MESSAGING_BANK_QUEUE = "normalizer.group11.messagingBank";
+	private static final String WEB_SERVICE_BANK_QUEUE = "normalizer.group11.webServiceBank";
+
+	private static final String AGGREGATOR_QUEUE = "aggregator.group11";
+
+	private QueueingConsumer.Delivery delivery;
+	private QueueingConsumer consumer;
+
+	public Normalizer(String queue) throws Exception {
+		ConnectionFactory factory = new ConnectionFactory();
+		factory.setHost("datdb.cphbusiness.dk");
+		Connection connection = factory.newConnection();
+		Channel channel = connection.createChannel();
+
+                channel.exchangeDeclare(queue, "fanout");
+                String queueName = channel.queueDeclare(queue,false,  false, false, null).getQueue();
+                channel.queueBind(queueName, queue, "");
+
+		System.out.println(" [*] Waiting for messages on queue: " + queue);
+
+		consumer = new QueueingConsumer(channel);
+		channel.basicConsume(queueName, true, consumer);
+
+	}
+
+	public static void main(String[] argv) throws Exception {
+		NormalizerBankJSON bankJsonNormalizer = new NormalizerBankJSON(
+				JSON_BANK_QUEUE);
+		bankJsonNormalizer.start();
+		NormalizerBankXML bankXmlNormalizer = new NormalizerBankXML(
+				XML_BANK_QUEUE);
+		bankXmlNormalizer.start();
+		NormalizerMessagingBank bankMessagingNormalizer = new NormalizerMessagingBank(
+				MESSAGING_BANK_QUEUE);
+		bankMessagingNormalizer.start();
+		NormalizerWebServiceBank bankWebServiceNormalizer = new NormalizerWebServiceBank(
+				WEB_SERVICE_BANK_QUEUE);
+		bankWebServiceNormalizer.start();
+
+	}
+
+	protected abstract String processMessage(String message) throws Exception;
+
+	private void sendReply(String message) throws Exception {
+		ConnectionFactory factory = new ConnectionFactory();
+		factory.setHost("datdb.cphbusiness.dk");
+		Connection connection = factory.newConnection();
+		Channel channel = connection.createChannel();
+
+		channel.basicPublish("", AGGREGATOR_QUEUE, null, message.getBytes());
+
+		System.out.println(" [x] Sent '" + message + "'");
+
+		channel.close();
+		connection.close();
+	}
+
+	public void run() {
+		while (true) {
+			try {
+				delivery = consumer.nextDelivery();
+				String message = new String(delivery.getBody());
+
+				System.out.println(" [x] Received '" + message + "'");
+
+				// process message
+				String reply = processMessage(message);
+
+				sendReply(reply);
+			} catch (Exception e) {
+				e.printStackTrace();
+				System.exit(1);
+			}
+		}
+	}
+}
+package dk.cphbusiness.group11.RecipientList;
+
+import java.io.ByteArrayInputStream;
+import java.io.StringWriter;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.transform.Transformer;
+import javax.xml.transform.TransformerFactory;
+import javax.xml.transform.dom.DOMSource;
+import javax.xml.transform.stream.StreamResult;
+import javax.xml.xpath.XPath;
+import javax.xml.xpath.XPathConstants;
+import javax.xml.xpath.XPathFactory;
+
+import org.w3c.dom.Document;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
+
+import com.rabbitmq.client.AMQP.BasicProperties;
+import com.rabbitmq.client.AMQP.BasicProperties.Builder;
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.Connection;
+import com.rabbitmq.client.ConnectionFactory;
+import com.rabbitmq.client.QueueingConsumer;
+
+/*
+Example expected xml message
+
+<RecipientListRequest>
+    <LoanDetails>
+        <ssn>1234567890</ssn>
+        <creditScore>685</creditScore> 
+        <loanAmount>1000.0</loanAmount> 
+        <loanDurationInMonths>36</loanDurationInMonths> 
+    </LoanDetails>
+    <BankList>
+        <bank>Bank1</bank>
+        <bank>Bank2</bank>
+        <bank>Bank3</bank>
+        <bank>Bank4</bank>
+    </BankList>
+</RecipientListRequest>
+*/
+
+
+public class RecipientList {
+    private static final String LISTNENING_QUEUE = "loanbroker.group11.recipientList";
+    
+    private boolean isRunning;
+    private HashMap<String, String> translatorMap;
+    
+    public RecipientList(){
+        isRunning = true;
+        translatorMap = new HashMap<String, String>();
+        translatorMap.put("cphbusiness.bankXML", "translator.group11.cphbusiness.bankXML");
+        translatorMap.put("cphbusiness.bankJSON", "translator.group11.cphbusiness.bankJSON");
+        translatorMap.put("group11.poorBankWS", "translator.group11.PoorBankWS");
+        translatorMap.put("group11.messagingBank", "translator.group11.cphbusiness.messagingBank");
+    }
+    
+    public void run() throws Exception{
+        ConnectionFactory factory = new ConnectionFactory();
+        factory.setHost("datdb.cphbusiness.dk");
+        Connection connection = factory.newConnection();
+        Channel channel = connection.createChannel();
+
+        channel.exchangeDeclare(LISTNENING_QUEUE, "fanout");
+        String queueName = channel.queueDeclare(LISTNENING_QUEUE,false,  false, false, null).getQueue();
+        channel.queueBind(queueName, LISTNENING_QUEUE, "");
+        System.out.println("Waiting for messages on queue: " + LISTNENING_QUEUE);
+
+        QueueingConsumer consumer = new QueueingConsumer(channel);
+        channel.basicConsume(queueName, true, consumer);
+        
+        while (this.isRunning){
+            QueueingConsumer.Delivery delivery = consumer.nextDelivery();
+            String message = new String(delivery.getBody());
+
+            System.out.println("Received '" + message + "'");
+            
+            this.parseAndProcessXmlMessage(message);
+        }
+    }
+    
+    private void parseAndProcessXmlMessage(String xmlMessage) throws Exception{
+        DocumentBuilderFactory builderFactory = DocumentBuilderFactory.newInstance();
+        DocumentBuilder builder = builderFactory.newDocumentBuilder();
+        
+        Document xmlDocument = builder.parse(new ByteArrayInputStream(xmlMessage.getBytes()));
+        XPath xPath = XPathFactory.newInstance().newXPath();
+        
+        Node loanDetailsNode = (Node) xPath.compile("/RecipientListRequest/LoanDetails").evaluate(xmlDocument, XPathConstants.NODE);
+        NodeList banks = (NodeList) xPath.compile("/RecipientListRequest/BankList/bank").evaluate(xmlDocument, XPathConstants.NODESET);
+        
+        StringWriter writer = new StringWriter();
+        Transformer transformer = TransformerFactory.newInstance().newTransformer();
+        transformer.transform(new DOMSource(loanDetailsNode), new StreamResult(writer));
+        String loanDetailsXmlString = writer.toString();
+        
+        ArrayList<String> banksToBeContacted = new ArrayList<String>();
+        for (int i = 0; i < banks.getLength(); i++) {
+            banksToBeContacted.add(banks.item(i).getFirstChild().getNodeValue());
+            System.out.println("Bank to be contacted: " + banksToBeContacted.get(i));
+        }
+        
+        contactBanks(banksToBeContacted, loanDetailsXmlString);
+    }
+    
+    private void contactBanks(List<String> banksToBeContacted, String loanDetailsXml) throws Exception{
+        if (banksToBeContacted.size() > 0 && loanDetailsXml != null && !loanDetailsXml.isEmpty()){
+            ConnectionFactory factory = new ConnectionFactory();
+            factory.setHost("datdb.cphbusiness.dk");
+            Connection connection = factory.newConnection();
+        
+            for (String bankQueue : banksToBeContacted){
+                String translatorQueue = this.translatorMap.get(bankQueue);
+
+                if (translatorQueue != null && !translatorQueue.isEmpty()){
+                    Channel channel = connection.createChannel();
+                    channel.exchangeDeclare(translatorQueue, "fanout");
+                    Builder propertiesBuilder = new BasicProperties.Builder();
+                    propertiesBuilder.replyTo(bankQueue);
+                    BasicProperties properties = propertiesBuilder.build();
+                    
+                    channel.basicPublish(translatorQueue, "", properties, loanDetailsXml.getBytes());
+                    
+                    System.out.println("Contacting translator on queue " + translatorQueue);
+                    System.out.println("With message: " + loanDetailsXml);
+                    channel.close();
+                }
+            }
+            
+            connection.close();
+        }
+    }
+
+    public static void main(String[] args) throws Exception {
+        RecipientList rl = new RecipientList();
+        rl.run();
+    }
+}package dk.cphbusiness.group11.Translators;
+
+import java.io.ByteArrayInputStream;
+import java.io.StringWriter;
+import java.text.SimpleDateFormat;
+import java.util.Calendar;
+
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.transform.Transformer;
+import javax.xml.transform.TransformerFactory;
+import javax.xml.transform.dom.DOMSource;
+import javax.xml.transform.stream.StreamResult;
+import javax.xml.xpath.XPath;
+import javax.xml.xpath.XPathConstants;
+import javax.xml.xpath.XPathFactory;
+
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+
+import com.rabbitmq.client.AMQP.BasicProperties;
+import com.rabbitmq.client.AMQP.BasicProperties.Builder;
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.Connection;
+import com.rabbitmq.client.ConnectionFactory;
+import com.rabbitmq.client.QueueingConsumer;
+
+public class MessagingBankTranslator {
+    private static final String RECEIVING_QUEUE = "translator.group11.cphbusiness.messagingBank";
+    private static final String SENDING_QUEUE = "group11.messagingBank";
+    private static final String REPLY_TO_QUEUE = "normalizer.group11.messagingBank";
+    private boolean isRunning;
+    
+    public MessagingBankTranslator(){
+        this.isRunning = true;
+    }
+    
+    private void parseAndProcessXmlMessage(String xmlMessage) throws Exception{
+        DocumentBuilderFactory builderFactory = DocumentBuilderFactory.newInstance();
+        DocumentBuilder builder = builderFactory.newDocumentBuilder();
+        
+        Document loanRequestXml = builder.parse(new ByteArrayInputStream(xmlMessage.getBytes()));
+        XPath xPath = XPathFactory.newInstance().newXPath();
+        Element loanDetailsElement = (Element) xPath.compile("/LoanDetails").evaluate(loanRequestXml, XPathConstants.NODE);
+        String ssn = loanDetailsElement.getElementsByTagName("ssn").item(0).getTextContent();
+        String creditScore = loanDetailsElement.getElementsByTagName("creditScore").item(0).getTextContent();
+        String loanAmount = loanDetailsElement.getElementsByTagName("loanAmount").item(0).getTextContent();
+      
+        
+        String temp = loanDetailsElement.getElementsByTagName("loanDurationInMonths").item(0).getTextContent();
+        int loanDurationInMonths = Integer.parseInt(temp);
+        
+        Document bankRequestXml = builder.newDocument();
+        Element root = bankRequestXml.createElement("LoanRequest");
+        bankRequestXml.appendChild(root);
+        
+        Element element = bankRequestXml.createElement("ssn");
+        element.appendChild(bankRequestXml.createTextNode(ssn));
+        root.appendChild(element);
+        
+        element = bankRequestXml.createElement("creditScore");
+        element.appendChild(bankRequestXml.createTextNode(creditScore));
+        root.appendChild(element);
+        
+        element = bankRequestXml.createElement("loanAmount");
+        element.appendChild(bankRequestXml.createTextNode(loanAmount));
+        root.appendChild(element);
+        
+        Calendar c = Calendar.getInstance();
+        c.set(1970, 1, 1);
+        c.add(Calendar.MONTH, loanDurationInMonths);
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+        String loanDate = sdf.format(c.getTime()) + " .0 CET";
+        
+        element = bankRequestXml.createElement("loanDuration");
+        element.appendChild(bankRequestXml.createTextNode(loanDate));
+        root.appendChild(element);
+        
+        StringWriter writer = new StringWriter();
+        Transformer transformer = TransformerFactory.newInstance().newTransformer();
+        transformer.transform(new DOMSource(root), new StreamResult(writer));
+        String bankRequestXmlString = writer.toString();
+        
+        
+        ConnectionFactory factory = new ConnectionFactory();
+        factory.setHost("datdb.cphbusiness.dk");
+        Connection connection = factory.newConnection();
+        Channel channel = connection.createChannel();
+
+        channel.exchangeDeclare(SENDING_QUEUE, "fanout");
+        Builder propertiesBuilder = new BasicProperties.Builder();
+        propertiesBuilder.replyTo(REPLY_TO_QUEUE);
+        BasicProperties properties = propertiesBuilder.build();
+        
+        System.out.println("Sent message: " + bankRequestXmlString);
+        channel.basicPublish(SENDING_QUEUE, "", properties, bankRequestXmlString.getBytes());
+    }
+    
+    public void run() throws Exception{
+        ConnectionFactory factory = new ConnectionFactory();
+        factory.setHost("datdb.cphbusiness.dk");
+        Connection connection = factory.newConnection();
+        Channel channel = connection.createChannel();
+
+        channel.exchangeDeclare(RECEIVING_QUEUE, "fanout");
+        String queueName = channel.queueDeclare(RECEIVING_QUEUE,false,  false, false, null).getQueue();
+        channel.queueBind(queueName, RECEIVING_QUEUE, "");
+        System.out.println("Messaging Bank Translator");
+        System.out.println("Waiting for messages on queue: " + RECEIVING_QUEUE);
+
+        QueueingConsumer consumer = new QueueingConsumer(channel);
+        channel.basicConsume(queueName, true, consumer);
+        
+        while (this.isRunning){
+            QueueingConsumer.Delivery delivery = consumer.nextDelivery();
+            String message = new String(delivery.getBody());
+
+            System.out.println("Received '" + message + "'");
+            
+            this.parseAndProcessXmlMessage(message);
+        }
+    }
+    
+    public static void main(String[] args) throws Exception {
+        MessagingBankTranslator t = new MessagingBankTranslator();
+        t.run();
+    }
+}
+/*
+ * To change this license header, choose License Headers in Project Properties.
+ * To change this template file, choose Tools | Templates
+ * and open the template in the editor.
+ */
+
+package dk.cphbusiness.group11.Translators.PoorBankWS;
+
+import java.io.ByteArrayInputStream;
+
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.xpath.XPath;
+import javax.xml.xpath.XPathConstants;
+import javax.xml.xpath.XPathFactory;
+
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.Connection;
+import com.rabbitmq.client.ConnectionFactory;
+import com.rabbitmq.client.QueueingConsumer;
+
+import dk.cphbusiness.group11.PoorBankWS.PoorBankService;
+import dk.cphbusiness.group11.PoorBankWS.PoorBankService_Service;
+import dk.cphbusiness.group11.PoorBankWS.PoorLoanResponsee;
+
+/**
+ *
+ * @author Paul
+ */
+public class TranslatorPoorBankWS {
+    private static final String RECEIVING_QUEUE = "translator.group11.PoorBankWS";
+    private static final String SENDING_QUEUE = "normalizer.group11.webServiceBank";
+    private boolean isRunning;
+    
+    public TranslatorPoorBankWS(){
+        this.isRunning = true;
+    }
+    
+    private void parseAndProcessXmlMessage(String xmlMessage) throws Exception{
+        DocumentBuilderFactory builderFactory = DocumentBuilderFactory.newInstance();
+        DocumentBuilder builder = builderFactory.newDocumentBuilder();
+        
+        Document loanRequestXml = builder.parse(new ByteArrayInputStream(xmlMessage.getBytes()));
+        XPath xPath = XPathFactory.newInstance().newXPath();
+        Element loanDetailsElement = (Element) xPath.compile("/LoanDetails").evaluate(loanRequestXml, XPathConstants.NODE);
+        String ssn = loanDetailsElement.getElementsByTagName("ssn").item(0).getTextContent();
+        int creditScore = Integer.parseInt(loanDetailsElement.getElementsByTagName("creditScore").item(0).getTextContent());
+        double loanAmount = Double.parseDouble(loanDetailsElement.getElementsByTagName("loanAmount").item(0).getTextContent());
+        String temp = loanDetailsElement.getElementsByTagName("loanDurationInMonths").item(0).getTextContent();
+        int loanDurationInMonths = Integer.parseInt(temp);
+        
+        PoorBankService_Service service = new PoorBankService_Service();
+        PoorBankService port = service.getPoorBankServiceImplPort();
+        PoorLoanResponsee result = port.poorLoan(ssn, creditScore, loanAmount, loanDurationInMonths);
+        
+        ConnectionFactory factory = new ConnectionFactory();
+        factory.setHost("datdb.cphbusiness.dk");
+        Connection connection = factory.newConnection();
+        Channel channel = connection.createChannel();
+
+        channel.exchangeDeclare(SENDING_QUEUE, "fanout");
+        
+        String xmlReturnMessage = "<LoanResponse>"
+                + "<interestRate>" + result.getInterestRate() + "</interestRate> \n" +
+                "   <ssn>" + result.getSsn() + "</ssn> \n" +
+                "</LoanResponse>";
+        channel.basicPublish(SENDING_QUEUE, "", null, xmlReturnMessage.getBytes());
+        
+    }
+    
+    public void run() throws Exception{
+        ConnectionFactory factory = new ConnectionFactory();
+        factory.setHost("datdb.cphbusiness.dk");
+        Connection connection = factory.newConnection();
+        Channel channel = connection.createChannel();
+
+        channel.exchangeDeclare(RECEIVING_QUEUE, "fanout");
+        String queueName = channel.queueDeclare(RECEIVING_QUEUE,false,  false, false, null).getQueue();
+        channel.queueBind(queueName, RECEIVING_QUEUE, "");
+        System.out.println("Waiting for messages on queue: " + RECEIVING_QUEUE);
+
+        QueueingConsumer consumer = new QueueingConsumer(channel);
+        channel.basicConsume(queueName, true, consumer);
+        
+        while (this.isRunning){
+            QueueingConsumer.Delivery delivery = consumer.nextDelivery();
+            String message = new String(delivery.getBody());
+
+            System.out.println("Received '" + message + "'");
+            
+            this.parseAndProcessXmlMessage(message);
+        }
+    }
+    
+    public static void main(String[] args) throws Exception {
+        TranslatorPoorBankWS t = new TranslatorPoorBankWS();
+        t.run();
+    }
+}
+package dk.cphbusiness.group11.Translators;
+
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+
+import javax.json.Json;
+import javax.json.JsonObjectBuilder;
+import javax.json.JsonWriter;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.xpath.XPath;
+import javax.xml.xpath.XPathConstants;
+import javax.xml.xpath.XPathFactory;
+
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+
+import com.rabbitmq.client.AMQP.BasicProperties;
+import com.rabbitmq.client.AMQP.BasicProperties.Builder;
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.Connection;
+import com.rabbitmq.client.ConnectionFactory;
+import com.rabbitmq.client.QueueingConsumer;
+
+public class TranslatorCphbusinessBankJSON {
+    private static final String RECEIVING_QUEUE = "translator.group11.cphbusiness.bankJSON";
+    private static final String SENDING_QUEUE = "cphbusiness.bankJSON";
+    private static final String REPLY_TO_QUEUE = "normalizer.group11.bankJSON";
+    private boolean isRunning;
+    
+    public TranslatorCphbusinessBankJSON(){
+        this.isRunning = true;
+    }
+    
+    private void parseAndProcessXmlMessage(String xmlMessage) throws Exception{
+        DocumentBuilderFactory builderFactory = DocumentBuilderFactory.newInstance();
+        DocumentBuilder builder = builderFactory.newDocumentBuilder();
+        
+        Document loanRequestXml = builder.parse(new ByteArrayInputStream(xmlMessage.getBytes()));
+        XPath xPath = XPathFactory.newInstance().newXPath();
+        Element loanDetailsElement = (Element) xPath.compile("/LoanDetails").evaluate(loanRequestXml, XPathConstants.NODE);
+        String ssn = loanDetailsElement.getElementsByTagName("ssn").item(0).getTextContent();
+        String creditScore = loanDetailsElement.getElementsByTagName("creditScore").item(0).getTextContent();
+        String loanAmount = loanDetailsElement.getElementsByTagName("loanAmount").item(0).getTextContent();
+        String temp = loanDetailsElement.getElementsByTagName("loanDurationInMonths").item(0).getTextContent();
+        int loanDurationInMonths = Integer.parseInt(temp);
+        
+        JsonObjectBuilder loanBuilder = Json.createObjectBuilder();
+        
+        loanBuilder.add("ssn", ssn);
+        
+        loanBuilder.add("creditScore", creditScore);
+        
+        loanBuilder.add("loanAmount", loanAmount);
+        
+        loanBuilder.add("loanDuration", loanDurationInMonths);
+        
+        ConnectionFactory factory = new ConnectionFactory();
+        factory.setHost("datdb.cphbusiness.dk");
+        Connection connection = factory.newConnection();
+        Channel channel = connection.createChannel();
+
+        channel.exchangeDeclare(SENDING_QUEUE, "fanout");
+        Builder propertiesBuilder = new BasicProperties.Builder();
+        propertiesBuilder.replyTo(REPLY_TO_QUEUE);
+        BasicProperties properties = propertiesBuilder.build();
+        
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        JsonWriter jsonWriter = Json.createWriter(outputStream);
+        jsonWriter.writeObject(loanBuilder.build());
+        jsonWriter.close();
+        
+        System.out.println("Sent message: " + outputStream.toString());
+        channel.basicPublish(SENDING_QUEUE, "", properties, outputStream.toByteArray());
+    }
+    
+    public void run() throws Exception{
+        ConnectionFactory factory = new ConnectionFactory();
+        factory.setHost("datdb.cphbusiness.dk");
+        Connection connection = factory.newConnection();
+        Channel channel = connection.createChannel();
+
+        channel.exchangeDeclare(RECEIVING_QUEUE, "fanout");
+        String queueName = channel.queueDeclare(RECEIVING_QUEUE,false,  false, false, null).getQueue();
+        channel.queueBind(queueName, RECEIVING_QUEUE, "");
+        System.out.println("Waiting for messages on queue: " + RECEIVING_QUEUE);
+
+        QueueingConsumer consumer = new QueueingConsumer(channel);
+        channel.basicConsume(queueName, true, consumer);
+        
+        while (this.isRunning){
+            QueueingConsumer.Delivery delivery = consumer.nextDelivery();
+            String message = new String(delivery.getBody());
+
+            System.out.println("Received '" + message + "'");
+            
+            this.parseAndProcessXmlMessage(message);
+        }
+    }
+    
+    public static void main(String[] args) throws Exception {
+        TranslatorCphbusinessBankJSON t = new TranslatorCphbusinessBankJSON();
+        t.run();
+    }
+}
+package dk.cphbusiness.group11.Translators;
+
+import java.io.ByteArrayInputStream;
+import java.io.StringWriter;
+import java.text.SimpleDateFormat;
+import java.util.Calendar;
+
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.transform.Transformer;
+import javax.xml.transform.TransformerFactory;
+import javax.xml.transform.dom.DOMSource;
+import javax.xml.transform.stream.StreamResult;
+import javax.xml.xpath.XPath;
+import javax.xml.xpath.XPathConstants;
+import javax.xml.xpath.XPathFactory;
+
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+
+import com.rabbitmq.client.AMQP.BasicProperties;
+import com.rabbitmq.client.AMQP.BasicProperties.Builder;
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.Connection;
+import com.rabbitmq.client.ConnectionFactory;
+import com.rabbitmq.client.QueueingConsumer;
+
+public class TranslatorCphbusinessBankXML {
+    private static final String RECEIVING_QUEUE = "translator.group11.cphbusiness.bankXML";
+    private static final String SENDING_QUEUE = "cphbusiness.bankXML";
+    private static final String REPLY_TO_QUEUE = "normalizer.group11.bankXML";
+    private boolean isRunning;
+    
+    public TranslatorCphbusinessBankXML(){
+        this.isRunning = true;
+    }
+    
+    private void parseAndProcessXmlMessage(String xmlMessage) throws Exception{
+        DocumentBuilderFactory builderFactory = DocumentBuilderFactory.newInstance();
+        DocumentBuilder builder = builderFactory.newDocumentBuilder();
+        
+        Document loanRequestXml = builder.parse(new ByteArrayInputStream(xmlMessage.getBytes()));
+        XPath xPath = XPathFactory.newInstance().newXPath();
+        Element loanDetailsElement = (Element) xPath.compile("/LoanDetails").evaluate(loanRequestXml, XPathConstants.NODE);
+        String ssn = loanDetailsElement.getElementsByTagName("ssn").item(0).getTextContent();
+        String creditScore = loanDetailsElement.getElementsByTagName("creditScore").item(0).getTextContent();
+        String loanAmount = loanDetailsElement.getElementsByTagName("loanAmount").item(0).getTextContent();
+        String temp = loanDetailsElement.getElementsByTagName("loanDurationInMonths").item(0).getTextContent();
+        int loanDurationInMonths = Integer.parseInt(temp);
+        
+        Document bankRequestXml = builder.newDocument();
+        Element root = bankRequestXml.createElement("LoanRequest");
+        bankRequestXml.appendChild(root);
+        
+        Element element = bankRequestXml.createElement("ssn");
+        element.appendChild(bankRequestXml.createTextNode(ssn));
+        root.appendChild(element);
+        
+        element = bankRequestXml.createElement("creditScore");
+        element.appendChild(bankRequestXml.createTextNode(creditScore));
+        root.appendChild(element);
+        
+        element = bankRequestXml.createElement("loanAmount");
+        element.appendChild(bankRequestXml.createTextNode(loanAmount));
+        root.appendChild(element);
+        
+        Calendar c = Calendar.getInstance();
+        c.set(1970, 1, 1);
+        c.add(Calendar.MONTH, loanDurationInMonths);
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+        String loanDate = sdf.format(c.getTime()) + ".0 CET";
+        
+        element = bankRequestXml.createElement("loanDuration");
+        element.appendChild(bankRequestXml.createTextNode(loanDate));
+        root.appendChild(element);
+        
+        StringWriter writer = new StringWriter();
+        Transformer transformer = TransformerFactory.newInstance().newTransformer();
+        transformer.transform(new DOMSource(root), new StreamResult(writer));
+        String bankRequestXmlString = writer.toString();
+        
+        
+        ConnectionFactory factory = new ConnectionFactory();
+        factory.setHost("datdb.cphbusiness.dk");
+        Connection connection = factory.newConnection();
+        Channel channel = connection.createChannel();
+
+        channel.exchangeDeclare(SENDING_QUEUE, "fanout");
+        Builder propertiesBuilder = new BasicProperties.Builder();
+        propertiesBuilder.replyTo(REPLY_TO_QUEUE);
+        BasicProperties properties = propertiesBuilder.build();
+        
+        System.out.println("Sent message: " + bankRequestXmlString);
+        channel.basicPublish(SENDING_QUEUE, "", properties, bankRequestXmlString.getBytes());
+    }
+    
+    public void run() throws Exception{
+        ConnectionFactory factory = new ConnectionFactory();
+        factory.setHost("datdb.cphbusiness.dk");
+        Connection connection = factory.newConnection();
+        Channel channel = connection.createChannel();
+
+        channel.exchangeDeclare(RECEIVING_QUEUE, "fanout");
+        String queueName = channel.queueDeclare(RECEIVING_QUEUE,false,  false, false, null).getQueue();
+        channel.queueBind(queueName, RECEIVING_QUEUE, "");
+        System.out.println("Waiting for messages on queue: " + RECEIVING_QUEUE);
+
+        QueueingConsumer consumer = new QueueingConsumer(channel);
+        channel.basicConsume(queueName, true, consumer);
+        
+        while (this.isRunning){
+            QueueingConsumer.Delivery delivery = consumer.nextDelivery();
+            String message = new String(delivery.getBody());
+
+            System.out.println("Received '" + message + "'");
+            
+            this.parseAndProcessXmlMessage(message);
+        }
+    }
+    
+    public static void main(String[] args) throws Exception {
+        TranslatorCphbusinessBankXML t = new TranslatorCphbusinessBankXML();
+        t.run();
+    }
+}
+/*
+ * To change this license header, choose License Headers in Project Properties.
+ * To change this template file, choose Tools | Templates
+ * and open the template in the editor.
+ */
+
+package dk.cphbusiness.group11.loanbroker;
+
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.Connection;
+import com.rabbitmq.client.ConnectionFactory;
+import javax.jws.WebService;
+import javax.jws.WebMethod;
+import javax.jws.WebParam;
+
+/**
+ *
+ * @author Paul
+ */
+@WebService(serviceName = "LoanBrokerWS")
+public class LoanBrokerWS {
+    private static final String RECEIVING_QUEUE = "cphbusiness.group11.LoanBroakerWS";
+    private static final String SENDING_QUEUE = "cphbusiness.group11.GetCreditScore";
+
+    /**
+     * This is a sample web service operation
+     */
+    @WebMethod(operationName = "hello")
+    public String hello(@WebParam(name = "name") String txt) {
+        return "Hello " + txt + " !";
+    }
+
+    /**
+     * Web service operation
+     */
+    @WebMethod(operationName = "LoanRequest")
+    public String LoanRequest(@WebParam(name = "ssn") String ssn, @WebParam(name = "loanAmount") double loanAmount, @WebParam(name = "loanDurationInMonths") int loanDurationInMonths) throws Exception {
+        String xmlMessage = "<LoanRequest>\n" +
+                "   <loanAmount>" + loanAmount + "</loanAmount> \n" +
+                "   <loanDurationInMonths>" + loanDurationInMonths + "</loanDurationInMonths> \n" +
+                "   <ssn>" + ssn + "</ssn> \n" +
+                "</LoanRequest>";
+        
+        System.out.println("Received loan request");
+        
+        ConnectionFactory factory = new ConnectionFactory();
+        factory.setHost("datdb.cphbusiness.dk");
+        Connection connection = factory.newConnection();
+        Channel channel = connection.createChannel();
+
+        channel.exchangeDeclare(SENDING_QUEUE, "fanout");
+        
+        System.out.println("Sending to queue '" + SENDING_QUEUE + "' message: " + xmlMessage);
+        channel.basicPublish(SENDING_QUEUE, "", null, xmlMessage.getBytes());
+        
+        return "";
+    }
+
+    
+}
+/*
+ * To change this template, choose Tools | Templates
+ * and open the template in the editor.
+ */
+package dk.cphbusiness.group11.manualTest_MesaagingBank;
+
+import com.rabbitmq.client.AMQP;
+import com.rabbitmq.client.Channel;
+import com.rabbitmq.client.Connection;
+import com.rabbitmq.client.ConnectionFactory;
+import com.rabbitmq.client.QueueingConsumer;
+
+/**
+ *
+ * @author Anth
+ */
+public class ManualTest_MessagingBank {
+    
+    private static final String QUEUE_NAME = "translator.group11.cphbusiness.messagingBank" ;
+	private static final String REPLY_QUEUE_NAME = "normalizer.group11";
+
+	public static void main(String[] argv) throws Exception {
+		send();
+		receive();
+	}
+
+	private static void receive() throws Exception {
+		ConnectionFactory factory = new ConnectionFactory();
+		factory.setHost("datdb.cphbusiness.dk");
+		Connection connection = factory.newConnection();
+		Channel channel = connection.createChannel();
+
+		String queueName = channel.queueDeclare(REPLY_QUEUE_NAME, false, false,
+				false, null).getQueue();
+		System.out.println(" [*] Waiting for the message");
+
+		QueueingConsumer consumer = new QueueingConsumer(channel);
+		channel.basicConsume(queueName, true, consumer);
+		QueueingConsumer.Delivery delivery = consumer.nextDelivery();
+		String message = new String(delivery.getBody());
+
+		System.out.println(" [x] Received '" + message + "'");
+	}
+
+	private static void send() throws Exception {
+		ConnectionFactory factory = new ConnectionFactory();
+		factory.setHost("datdb.cphbusiness.dk");
+		Connection connection = factory.newConnection();
+		Channel channel = connection.createChannel();
+
+		channel.queueDeclare(QUEUE_NAME, false, false, false, null);
+
+		AMQP.BasicProperties.Builder propertiesBuilder = new AMQP.BasicProperties.Builder();
+		propertiesBuilder.replyTo(REPLY_QUEUE_NAME);
+		AMQP.BasicProperties properties = propertiesBuilder.build();
+
+		String message = "<LoanRequest><ssn>1234567890</ssn>"
+				+ "<creditScore>585</creditScore>"
+				+ "<loanAmount>1000</loanAmount><loanDuration>36</loanDuration>"
+				+ "</LoanRequest>";
+
+		channel.basicPublish("", QUEUE_NAME, properties, message.getBytes());
+		System.out.println(" [x] Sent '" + message + "'");
+
+		channel.close();
+		connection.close();
+	}
+}
+package dk.cphbusiness.group11.poorbank;
+
+import javax.jws.WebMethod;
+import javax.jws.WebParam;
+import javax.jws.WebService;
+
+@WebService
+public interface PoorBankService {
+    @WebMethod
+    PoorLoanResponse PoorLoan(@WebParam(name = "ssn") String ssn, @WebParam(name = "creditScore") int creditScore, @WebParam(name = "loanAmount") double loanAmount, @WebParam(name = "loanDurationInMonths") int loanDurationInMonths) throws PoorException;
+}
+/*
+ * To change this license header, choose License Headers in Project Properties.
+ * To change this template file, choose Tools | Templates
+ * and open the template in the editor.
+ */
+
+package dk.cphbusiness.group11.poorbank;
+
+import javax.jws.WebService;
+import javax.jws.WebMethod;
+import javax.jws.WebParam;
+import javax.jws.WebResult;
+
+/**
+ *
+ * @author Paul
+ */
+@WebService(serviceName = "PoorBankService", endpointInterface="dk.cphbusiness.group11.poorbank.PoorBankService")
+public class PoorBankServiceImpl implements PoorBankService {
+
+    /**
+     * This is a sample web service operation
+     */
+    public String hello(@WebParam(name = "name") String txt) {
+        return "Hello " + txt + " !";
+    }
+
+    /**
+     * Web service operation
+     */
+    @Override
+    @WebResult(name="PoorLoan")
+    public PoorLoanResponse PoorLoan(@WebParam(name = "ssn") String ssn, @WebParam(name = "creditScore") int creditScore, @WebParam(name = "loanAmount") double loanAmount, @WebParam(name = "loanDurationInMonths") int loanDurationInMonths) throws PoorException {
+        if (loanAmount > 1000)
+            throw new PoorException("We are too poor to fulfill your loan request.");
+        
+        PoorLoanResponse response = new PoorLoanResponse();
+        response.setSsn(ssn);
+        double interestRate = 25 / ((double)creditScore / 800);
+        response.setInterestRate(interestRate);
+        
+        return response;
+    }
+}
+/*
+ * To change this license header, choose License Headers in Project Properties.
+ * To change this template file, choose Tools | Templates
+ * and open the template in the editor.
+ */
+
+package dk.cphbusiness.group11.poorbank;
+
+/**
+ *
+ * @author Paul
+ */
+public class PoorException extends Exception {
+
+    PoorException(String message) {
+        super(message);
+    }
+    
+}
+/*
+ * To change this license header, choose License Headers in Project Properties.
+ * To change this template file, choose Tools | Templates
+ * and open the template in the editor.
+ */
+
+package dk.cphbusiness.group11.poorbank;
+
+import javax.xml.bind.annotation.XmlAccessType;
+import javax.xml.bind.annotation.XmlAccessorType;
+import javax.xml.bind.annotation.XmlElement;
+import javax.xml.bind.annotation.XmlRootElement;
+import javax.xml.bind.annotation.XmlType;
+
+/**
+ *
+ * @author Paul
+ */
+
+@XmlAccessorType(XmlAccessType.FIELD)
+@XmlType(name = "PoorLoanResponsee", namespace = "http://cphbusiness.dk")
+public class PoorLoanResponse {
+    public PoorLoanResponse(){}
+    
+    @XmlElement(name = "interestRate")
+    protected double interestRate;
+    public double getInterestRate() {
+        return interestRate;
+    }
+    public void setInterestRate(double interestRate) {
+        this.interestRate = interestRate;
+    }
+
+    @XmlElement(name = "ssn")
+    protected String ssn;
+    public String getSsn() {
+        return ssn;
+    }
+    public void setSsn(String ssn) {
+        this.ssn = ssn;
+    }
+}

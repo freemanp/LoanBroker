@@ -35,7 +35,7 @@ import org.w3c.dom.Element;
 public class Aggregator {
     private HashMap<String, List<LoanResponseDetails>> activeLoanRequests;
     private static final String RECEIVING_QUEUE = "aggregator.group11";
-    private static final String SENDING_QUEUE = "group11.loanRequest.response";
+    private static final String SENDING_QUEUE = "cphbusiness.group11.LoanBroakerWS";
     private boolean isRunning;
     
     public Aggregator(){
